@@ -45,6 +45,17 @@ int main(int argc, char **argv)
     (void)argc;
     (void)argv;
 
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return EXIT_FAILURE;
+    }
+    if (pid > 0) {
+        // Parent exits
+        return EXIT_SUCCESS;
+    }
+
+    // Child continues
     if (setsid() == -1) {
         perror("setsid");
         return EXIT_FAILURE;
