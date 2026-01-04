@@ -45,6 +45,10 @@ int brick_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct axi
     init_active_low(st);
     memcpy(st->buttons, BRICK_BUTTON_DEFS, sizeof(BRICK_BUTTON_DEFS));
     memcpy(st->hat_pins, BRICK_HAT_PINS, sizeof(BRICK_HAT_PINS));
+    if (device_rumble_init(&st->rumble, rumble_a133_driver()) < 0) {
+        sunxi_gpio_close();
+        return -1;
+    }
 
     for (size_t i = 0; i < BRICK_BUTTON_COUNT; ++i) {
         if (st->buttons[i].gpio < 0) {
@@ -70,6 +74,9 @@ int brick_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct axi
 bool brick_poll(void *ctx)
 {
     struct brick_state *st = ctx;
+    if (!device_rumble_poll(&st->rumble, st->gp)) {
+        return false;
+    }
     device_dirty_reset(&st->dirty, false);
     for (size_t i = 0; i < BRICK_BUTTON_COUNT; ++i) {
         if (st->buttons[i].gpio < 0) {
@@ -103,6 +110,9 @@ bool brick_poll(void *ctx)
 
 void brick_close(void *ctx)
 {
-    (void)ctx;
+    struct brick_state *st = ctx;
+    if (st) {
+        device_rumble_close(&st->rumble);
+    }
     sunxi_gpio_close();
 }

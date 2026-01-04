@@ -4,6 +4,7 @@
 
 #include "../../gamepad/uinput.h"
 #include "smart_pro_structs.h"
+#include "../device_rumble.h"
 
 /* Bit masks for buttons reported by the Smart Pro left-hand frame. */
 enum {
@@ -102,4 +103,6 @@ static const struct gamepad_desc SMART_PRO_GAMEPAD_DESC = {
     .axis_count = sizeof(SP_AXES) / sizeof(SP_AXES[0]),
     .switches = SP_SWITCHES,
     .switch_count = sizeof(SP_SWITCHES) / sizeof(SP_SWITCHES[0]),
+    .ff_effects_max = DEVICE_RUMBLE_EFFECT_SLOTS,
+    .enable_ff_rumble = true,
 };

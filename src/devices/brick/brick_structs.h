@@ -3,6 +3,7 @@
 #include <stdbool.h>
 
 #include "../device_helpers.h"
+#include "../device_rumble.h"
 
 struct gamepad;
 
@@ -21,4 +22,5 @@ struct brick_state {
     struct device_hat_state hat;
     struct device_dirty_state dirty;
     bool active_low;
+    struct device_rumble_state rumble;
 };

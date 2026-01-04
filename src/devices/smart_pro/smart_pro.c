@@ -150,6 +150,12 @@ int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct
     rb_init(&dev->left.c.rb);
     rb_init(&dev->right.c.rb);
 
+    if (device_rumble_init(&dev->rumble, rumble_a133_driver()) < 0) {
+        close(fd_left);
+        close(fd_right);
+        return -1;
+    }
+
     *ctx = dev;
     return 0;
 }
@@ -160,6 +166,10 @@ bool smart_pro_poll(void *ctx)
     uint8_t buf[128];
     uint8_t frame_bytes[8];
     device_dirty_reset(&dev->dirty, poll_switch(dev->left.c.gp, SP_GPIO_INPUT, &dev->left.last_switch));
+
+    if (!device_rumble_poll(&dev->rumble, dev->left.c.gp)) {
+        return false;
+    }
 
     struct pollfd pfds[2] = {
         {.fd = dev->left.c.fd, .events = POLLIN},
@@ -212,5 +222,6 @@ void smart_pro_close(void *ctx)
     if (!dev) return;
     close(dev->left.c.fd);
     close(dev->right.c.fd);
+    device_rumble_close(&dev->rumble);
     memset(dev, 0, sizeof(*dev));
 }

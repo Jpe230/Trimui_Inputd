@@ -1,12 +1,12 @@
-# Trimui Smart Pro Input Daemon
+# Trimui Input Daemon
 
-Userspace daemon that bonds the Trimui Smart Pro’s two serial pads into a single Linux joystick (`/dev/input/js0`). It reads both halves over `/dev/ttyS4` and `/dev/ttyS3`, applies the on-device calibration files, exposes a virtual controller via `uinput`, and mirrors the stock firmware’s GPIO bring-up so it can run immediately after boot.
+User-space input daemon for the Trimui family (Smart Pro, Smart Pro S, Brick). It reads the device-specific GPIO/serial inputs, publishes a unified uinput gamepad, and now supports rumble on A133-based hardware (Smart Pro / Brick).
 
-## Highlights
-
-- **Dual-serial aggregation:** Continuously polls both pad MCUs at 1 kHz, reopens the TTY automatically when errors occur, and keeps axis/button state in sync with the uinput device.
-- **Calibration aware:** Loads `joypad.config` and `joypad_right.config` (left/right) from `/mnt/UDISK/`, falling back to `/userdata/system/config/trimui-input/`, with an optional override directory passed on the command line. Each file can specify `x_min`, `x_max`, `x_zero`, `y_min`, `y_max`, `y_zero`, and `deadzone` (default 1024).
-- **Deterministic startup:** After the uinput node is created the daemon waits 1 s before zeroing the sticks to match the OEM behavior and reduce drift.
+## Features
+- Auto-detects Smart Pro, Smart Pro S, or Brick at startup.
+- Maps physical buttons, triggers, sticks, and hat to a single virtual gamepad.
+- Rumble for A133-based units (GPIO 227). Smart Pro S rumble is pluggable but not yet implemented.
+- Simple calibration helpers for analog sticks.
 
 ## Building
 
@@ -15,7 +15,8 @@ The repo ships with a cross-compilation container. From the project root:
 ```bash
 docker compose up --build
 ```
-If you are using a x86 host, you might need to run this:
+
+If you are using an x86 host, you might need to run this first:
 
 ```bash
 docker run --privileged --rm tonistiigi/binfmt --install arm64
@@ -26,34 +27,27 @@ The resulting binary lives at `build/tsp_inputd/bin/trimui_inputd_smart_pro`.
 If you prefer a native toolchain, install `gcc`, `make`, and standard headers for your aarch64 rootfs, then run:
 
 ```bash
-make
+make clean && make
 ```
+
+The native build outputs to `build/trimui_inputd/bin/trimui_inputd`.
 
 ## Running
+- Requires access to `/dev/uinput`, serial ports (`/dev/ttyS3/4` or `/dev/ttyAS5/7`), `/dev/mem` (Brick GPIO), and `/sys/class/gpio` (A133 rumble).
+- Run the built binary as root (or with the needed capabilities):
 
 ```bash
-./build/tsp_inputd/bin/tsp_inputd [config_dir]
+sudo ./build/trimui_inputd/bin/trimui_inputd
 ```
 
-- Without arguments the daemon searches `/mnt/UDISK` first, then `/userdata/system/config/trimui-input/`.
-- If `config_dir` is supplied, the daemon looks for `joypad.config` and `joypad_right.config` there before falling back to the default locations.
-- All GPIO control happens via sysfs; run as root (or grant sufficient permissions) so the daemon can drive the pins and open `/dev/uinput`.
+The daemon auto-detects the connected Trimui variant and starts polling.
 
-## Configuration File Format
+## Configuration
+- `BRICK_ACTIVE_LOW=0` forces Brick buttons to be treated as active-high (defaults to active-low).
+- Rumble: A133 driver uses GPIO 227 active-high. Smart Pro S rumble is reserved for a future driver; the architecture allows another backend to be plugged in without touching device logic.
 
-```
-x_min=0
-x_max=4095
-y_min=0
-y_max=4095
-x_zero=2048
-y_zero=2048
-deadzone=1024
-```
-
-Values are unsigned integers. `deadzone` clamps the ABS flat value and software filtering range; if omitted it defaults to 1024.
-
-## Notes
-
-- The daemon targets the stock Trimui Smart Pro kernel (19200 baud serial pads, sysfs GPIO numbers shown above). If your board revision changes pin muxing, update `src/gpio/gpio.c`.
-- Calibration files are not modified by the daemon; use the OEM calibration utility or your own tool to update them, then restart this service.
+## Repo layout
+- `src/devices/`: Device-specific logic (Smart Pro, Smart Pro S, Brick) and shared rumble core.
+- `src/drivers/`: Low-level helpers (serial, GPIO, sunxi GPIO mmap, rumble drivers).
+- `src/gamepad/`: uinput wrapper.
+- `calibration/`: Stick calibration helpers.

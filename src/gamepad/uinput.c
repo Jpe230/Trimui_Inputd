@@ -1,5 +1,6 @@
 #include "uinput.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,7 +35,7 @@ struct gamepad *gamepad_init(const struct gamepad_desc *desc)
         return NULL;
     }
 
-    int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+    int fd = open("/dev/uinput", O_RDWR | O_NONBLOCK);
     if (fd < 0) {
         perror("open /dev/uinput");
         return NULL;
@@ -61,9 +62,15 @@ struct gamepad *gamepad_init(const struct gamepad_desc *desc)
         }
     }
 
+    if (desc->ff_effects_max > 0 && desc->enable_ff_rumble) {
+        ioctl(fd, UI_SET_EVBIT, EV_FF);
+        ioctl(fd, UI_SET_FFBIT, FF_RUMBLE);
+    }
+
     struct uinput_setup setup;
     memset(&setup, 0, sizeof(setup));
     setup.id = desc->id;
+    setup.ff_effects_max = desc->ff_effects_max;
     snprintf(setup.name, UINPUT_MAX_NAME_SIZE, "%s", desc->name);
 
     if (ioctl(fd, UI_DEV_SETUP, &setup) < 0) {
@@ -132,4 +139,35 @@ void gamepad_destroy(struct gamepad *gp)
     ioctl(gp->fd, UI_DEV_DESTROY);
     close(gp->fd);
     free(gp);
+}
+
+int gamepad_get_fd(struct gamepad *gp)
+{
+    if (!gp) {
+        return -1;
+    }
+    return gp->fd;
+}
+
+int gamepad_read_event(struct gamepad *gp, struct input_event *ev)
+{
+    if (!gp || !ev) {
+        return -1;
+    }
+    ssize_t r = read(gp->fd, ev, sizeof(*ev));
+    if (r < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return 0;
+        }
+        perror("read uinput");
+        return -1;
+    }
+    if (r == 0) {
+        return 0;
+    }
+    if (r != (ssize_t)sizeof(*ev)) {
+        fprintf(stderr, "short read from uinput\n");
+        return -1;
+    }
+    return 1;
 }

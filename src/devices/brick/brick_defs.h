@@ -4,6 +4,7 @@
 
 #include "../../gamepad/uinput.h"
 #include "brick_structs.h"
+#include "../device_rumble.h"
 
 /* Helper macro for describing Brick absolute axes. */
 #define BRICK_AXIS_DESC(_code, _min, _max) \
@@ -70,4 +71,6 @@ static const struct gamepad_desc BRICK_GAMEPAD_DESC = {
     .axis_count = sizeof(BRICK_AXES) / sizeof(BRICK_AXES[0]),
     .switches = NULL,
     .switch_count = 0,
+    .ff_effects_max = DEVICE_RUMBLE_EFFECT_SLOTS,
+    .enable_ff_rumble = true,
 };

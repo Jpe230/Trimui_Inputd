@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "../device_helpers.h"
+#include "../device_rumble.h"
 #include "../../drivers/serial/serial.h"
 
 struct gamepad;
@@ -88,4 +89,5 @@ struct smart_pro_device {
     struct smart_pro_left_ctx left;
     struct smart_pro_right_ctx right;
     struct device_dirty_state dirty;
+    struct device_rumble_state rumble;
 };

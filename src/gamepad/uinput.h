@@ -23,6 +23,8 @@ struct gamepad_desc {
     size_t axis_count;
     const unsigned short *switches;
     size_t switch_count;
+    unsigned int ff_effects_max;
+    bool enable_ff_rumble;
 };
 
 /**
@@ -78,3 +80,20 @@ void gamepad_sync(struct gamepad *gp);
  * @return void.
  */
 void gamepad_destroy(struct gamepad *gp);
+
+/**
+ * Retrieve the underlying uinput file descriptor for advanced handling (e.g. FF).
+ *
+ * @param gp Gamepad handle returned by gamepad_init.
+ * @return File descriptor or -1 on error.
+ */
+int gamepad_get_fd(struct gamepad *gp);
+
+/**
+ * Attempt to read a pending input_event from the uinput device (non-blocking).
+ *
+ * @param gp Gamepad handle returned by gamepad_init.
+ * @param ev Output struct populated when an event is available.
+ * @return 1 when an event was read, 0 when no data is ready, -1 on fatal error.
+ */
+int gamepad_read_event(struct gamepad *gp, struct input_event *ev);
