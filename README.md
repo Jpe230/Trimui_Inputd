@@ -6,8 +6,6 @@ Userspace daemon that bonds the Trimui Smart Pro’s two serial pads into a sing
 
 - **Dual-serial aggregation:** Continuously polls both pad MCUs at 1 kHz, reopens the TTY automatically when errors occur, and keeps axis/button state in sync with the uinput device.
 - **Calibration aware:** Loads `joypad.config` and `joypad_right.config` (left/right) from `/mnt/UDISK/`, falling back to `/userdata/system/config/trimui-input/`, with an optional override directory passed on the command line. Each file can specify `x_min`, `x_max`, `x_zero`, `y_min`, `y_max`, `y_zero`, and `deadzone` (default 1024).
-- **Rumble support:** Advertises `FF_RUMBLE`/`FF_GAIN`, keeps a small effect pool, and translates play commands into GPIO 227 toggles so native ports can vibrate the device.
-- **Board bring-up:** Reproduces the stock `inputd` GPIO pokes (PD14/PD18 rails, rumble default, DIP input, optional 5 V enable) so the pads, DIP switch, and rumble motor are usable even on a cold boot.
 - **Deterministic startup:** After the uinput node is created the daemon waits 1 s before zeroing the sticks to match the OEM behavior and reduce drift.
 
 ## Building
@@ -58,5 +56,4 @@ Values are unsigned integers. `deadzone` clamps the ABS flat value and software 
 ## Notes
 
 - The daemon targets the stock Trimui Smart Pro kernel (19200 baud serial pads, sysfs GPIO numbers shown above). If your board revision changes pin muxing, update `src/gpio/gpio.c`.
-- Rumble currently uses an on/off duty cycle. If you need variable intensity, consider swapping GPIO 227 to a PWM-capable interface or extend the driver with a software PWM loop.
 - Calibration files are not modified by the daemon; use the OEM calibration utility or your own tool to update them, then restart this service.

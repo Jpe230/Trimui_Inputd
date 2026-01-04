@@ -1,0 +1,135 @@
+#include "uinput.h"
+
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <unistd.h>
+
+struct gamepad {
+    int fd;
+};
+
+static void set_abs(int fd, const struct gamepad_abs_desc *axis)
+{
+    struct uinput_abs_setup abs = {
+        .code = axis->code,
+        .absinfo = {
+            .minimum = axis->min,
+            .maximum = axis->max,
+            .fuzz = axis->fuzz,
+            .flat = axis->flat,
+            .resolution = axis->resolution,
+        },
+    };
+    ioctl(fd, UI_SET_ABSBIT, axis->code);
+    ioctl(fd, UI_ABS_SETUP, &abs);
+}
+
+struct gamepad *gamepad_init(const struct gamepad_desc *desc)
+{
+    if (!desc || !desc->name) {
+        return NULL;
+    }
+
+    int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+    if (fd < 0) {
+        perror("open /dev/uinput");
+        return NULL;
+    }
+
+    if (desc->key_count > 0) {
+        ioctl(fd, UI_SET_EVBIT, EV_KEY);
+        for (size_t i = 0; i < desc->key_count; ++i) {
+            ioctl(fd, UI_SET_KEYBIT, desc->keys[i]);
+        }
+    }
+
+    if (desc->axis_count > 0) {
+        ioctl(fd, UI_SET_EVBIT, EV_ABS);
+        for (size_t i = 0; i < desc->axis_count; ++i) {
+            set_abs(fd, &desc->axes[i]);
+        }
+    }
+
+    if (desc->switch_count > 0) {
+        ioctl(fd, UI_SET_EVBIT, EV_SW);
+        for (size_t i = 0; i < desc->switch_count; ++i) {
+            ioctl(fd, UI_SET_SWBIT, desc->switches[i]);
+        }
+    }
+
+    struct uinput_setup setup;
+    memset(&setup, 0, sizeof(setup));
+    setup.id = desc->id;
+    snprintf(setup.name, UINPUT_MAX_NAME_SIZE, "%s", desc->name);
+
+    if (ioctl(fd, UI_DEV_SETUP, &setup) < 0) {
+        perror("UI_DEV_SETUP");
+        close(fd);
+        return NULL;
+    }
+    if (ioctl(fd, UI_DEV_CREATE) < 0) {
+        perror("UI_DEV_CREATE");
+        close(fd);
+        return NULL;
+    }
+
+    struct gamepad *gp = calloc(1, sizeof(*gp));
+    if (!gp) {
+        perror("calloc");
+        ioctl(fd, UI_DEV_DESTROY);
+        close(fd);
+        return NULL;
+    }
+    gp->fd = fd;
+    return gp;
+}
+
+static void emit_event(struct gamepad *gp, unsigned short type, unsigned short code, int value)
+{
+    if (!gp) {
+        return;
+    }
+    struct input_event ev;
+    memset(&ev, 0, sizeof(ev));
+    gettimeofday(&ev.time, NULL);
+    ev.type = type;
+    ev.code = code;
+    ev.value = value;
+    if (write(gp->fd, &ev, sizeof(ev)) < 0) {
+        perror("write uinput");
+    }
+}
+
+void gamepad_emit_key(struct gamepad *gp, unsigned short code, int value)
+{
+    emit_event(gp, EV_KEY, code, value);
+}
+
+void gamepad_emit_abs(struct gamepad *gp, unsigned short code, int value)
+{
+    emit_event(gp, EV_ABS, code, value);
+}
+
+void gamepad_emit_sw(struct gamepad *gp, unsigned short code, int value)
+{
+    emit_event(gp, EV_SW, code, value);
+}
+
+void gamepad_sync(struct gamepad *gp)
+{
+    emit_event(gp, EV_SYN, SYN_REPORT, 0);
+}
+
+void gamepad_destroy(struct gamepad *gp)
+{
+    if (!gp) {
+        return;
+    }
+    ioctl(gp->fd, UI_DEV_DESTROY);
+    close(gp->fd);
+    free(gp);
+}

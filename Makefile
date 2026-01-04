@@ -1,8 +1,8 @@
 CC = gcc
-CFLAGS = -Wall -Wextra
-LDFLAGS = -lrt
+CFLAGS = -std=c11 -Wall -Wextra -pthread
+LDFLAGS = -pthread -lm -lrt
 
-TARGET = trimui_inputd_smart_pro
+TARGET = trimui_inputd
 
 SRCDIR = src
 BUILDDIR = build
@@ -12,6 +12,10 @@ BINDIR = $(BUILDDIR)/$(TARGET)/bin
 SRCS = $(shell find $(SRCDIR) -type f -name "*.c")
 OBJS = $(SRCS:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
+.PHONY: all clean
+
+all: $(BINDIR)/$(TARGET)
+
 $(BINDIR)/$(TARGET): $(OBJS) | $(BINDIR)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
@@ -20,13 +24,14 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJDIR):
-	mkdir -p $(OBJDIR)
+	$(MKDIR_P) $(OBJDIR)
 
 $(BINDIR):
-	mkdir -p $(BINDIR)
+	$(MKDIR_P) $(BINDIR)
 
-.PHONY: clean
 clean:
 	rm -rf $(BUILDDIR)
+	rm -f $(TARGET)
+	find $(SRCDIR) -name '*.o' -delete
 
 MKDIR_P ?= mkdir -p

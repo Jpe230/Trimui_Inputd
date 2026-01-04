@@ -1,0 +1,216 @@
+#define _DEFAULT_SOURCE
+#include "smart_pro.h"
+
+#include <errno.h>
+#include <poll.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "../../drivers/serial/serial.h"
+#include "../../gamepad/uinput.h"
+#include "../../calibration/calibration.h"
+#include "../../drivers/gpio/gpio.h"
+
+static struct smart_pro_device smart_pro_ctx;
+static const struct device_axis_cfg SP_AXIS_LEFT_CFG = {.abs_code_x = ABS_X, .abs_code_y = ABS_Y, .invert_x = true, .invert_y = true};
+static const struct device_axis_cfg SP_AXIS_RIGHT_CFG = {.abs_code_x = ABS_Z, .abs_code_y = ABS_RZ, .invert_x = true, .invert_y = true};
+
+static int smart_pro_gpio_init(int *switch_initial)
+{
+    const int output_pins[] = {SP_GPIO_OUT1, SP_GPIO_OUT2};
+    for (size_t i = 0; i < sizeof(output_pins) / sizeof(output_pins[0]); ++i) {
+        if (gpio_export(output_pins[i]) < 0 || gpio_set_direction(output_pins[i], true) < 0 || gpio_write(output_pins[i], 1) < 0) {
+            return -1;
+        }
+    }
+    if (gpio_export(SP_GPIO_INPUT) < 0 || gpio_set_direction(SP_GPIO_INPUT, false) < 0) {
+        return -1;
+    }
+    int val = 0;
+    if (gpio_read(SP_GPIO_INPUT, &val) == 0) {
+        *switch_initial = val;
+    } else {
+        *switch_initial = -1;
+    }
+    return 0;
+}
+
+static bool poll_switch(struct gamepad *gp, int pin, int *last_val)
+{
+    int val = 0;
+    if (gpio_read(pin, &val) < 0) {
+        return false;
+    }
+    if (*last_val == val) {
+        return false;
+    }
+    *last_val = val;
+    gamepad_emit_sw(gp, 1, val);
+    return true;
+}
+
+static void emit_buttons_from_map(struct gamepad *gp, uint8_t btn_raw, uint8_t diff, const struct sp_button_map_entry *map, size_t map_len, struct device_dirty_state *dirty)
+{
+    for (size_t i = 0; i < map_len; ++i) {
+        uint8_t mask = map[i].mask;
+        if (diff & mask) {
+            int pressed = (btn_raw & mask) ? 1 : 0;
+            gamepad_emit_key(gp, map[i].code, pressed);
+            device_dirty_mark(dirty);
+        }
+    }
+}
+
+static void process_left_frame_bytes(struct smart_pro_left_ctx *ctx, const uint8_t frame_bytes[8], struct device_dirty_state *dirty)
+{
+    uint8_t btn_raw = frame_bytes[2];
+    uint16_t raw_x = ((uint16_t)frame_bytes[3] << 8) | frame_bytes[4];
+    uint16_t raw_y = ((uint16_t)frame_bytes[5] << 8) | frame_bytes[6];
+
+    device_axes_process_pair(ctx->c.gp, ctx->c.ax, ctx->c.ay, raw_x, raw_y, &SP_AXIS_LEFT_CFG, &ctx->c.last_x, &ctx->c.last_y, dirty);
+
+    uint8_t diff = btn_raw ^ ctx->c.prev_buttons;
+    device_hat_apply_masks(&ctx->hat, btn_raw, diff, SP_BTN_DPAD_UP_MASK, SP_BTN_DPAD_DOWN_MASK, SP_BTN_DPAD_LEFT_MASK, SP_BTN_DPAD_RIGHT_MASK);
+
+    emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_LEFT_BUTTON_MAP, SP_LEFT_BUTTON_MAP_COUNT, dirty);
+
+    if (diff & SP_DPAD_MASK) {
+        device_dirty_merge(dirty, device_hat_emit(ctx->c.gp, &ctx->hat));
+    }
+
+    ctx->c.prev_buttons = btn_raw;
+}
+
+static void process_right_frame_bytes(struct smart_pro_right_ctx *ctx, const uint8_t frame_bytes[8], struct device_dirty_state *dirty)
+{
+    uint8_t btn_raw = frame_bytes[2];
+    uint16_t raw_x = ((uint16_t)frame_bytes[3] << 8) | frame_bytes[4];
+    uint16_t raw_y = ((uint16_t)frame_bytes[5] << 8) | frame_bytes[6];
+
+    device_axes_process_pair(ctx->c.gp, ctx->c.ax, ctx->c.ay, raw_x, raw_y, &SP_AXIS_RIGHT_CFG, &ctx->c.last_x, &ctx->c.last_y, dirty);
+
+    uint8_t diff = btn_raw ^ ctx->c.prev_buttons;
+
+    emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_RIGHT_BUTTON_MAP, SP_RIGHT_BUTTON_MAP_COUNT, dirty);
+
+    ctx->c.prev_buttons = btn_raw;
+}
+
+int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct axis_state *ly, struct axis_state *rx, struct axis_state *ry, bool verbose)
+{
+    int switch_initial = -1;
+    if (smart_pro_gpio_init(&switch_initial) < 0) {
+        return -1;
+    }
+    int fd_left = serial_open_nonblocking("/dev/ttyS4");
+    if (fd_left < 0) {
+        return -1;
+    }
+    int fd_right = serial_open_nonblocking("/dev/ttyS3");
+    if (fd_right < 0) {
+        close(fd_left);
+        return -1;
+    }
+    if (serial_config(fd_left) < 0 || serial_config(fd_right) < 0) {
+        close(fd_left);
+        close(fd_right);
+        return -1;
+    }
+
+    struct smart_pro_device *dev = &smart_pro_ctx;
+    memset(dev, 0, sizeof(*dev));
+
+    dev->left.c.fd = fd_left;
+    dev->left.c.gp = gp;
+    dev->left.c.ax = lx;
+    dev->left.c.ay = ly;
+    dev->left.c.running = NULL;
+    dev->left.c.verbose = verbose;
+    dev->left.c.prev_buttons = 0;
+    dev->left.c.last_x = 0;
+    dev->left.c.last_y = 0;
+    dev->left.last_z = 0;
+    dev->left.last_switch = switch_initial;
+    dev->left.hat = (struct device_hat_state){.x = 0, .y = 0, .left = 0, .right = 0, .up = 0, .down = 0};
+
+    dev->right.c.fd = fd_right;
+    dev->right.c.gp = gp;
+    dev->right.c.ax = rx;
+    dev->right.c.ay = ry;
+    dev->right.c.running = NULL;
+    dev->right.c.verbose = verbose;
+    dev->right.c.prev_buttons = 0;
+    dev->right.c.last_x = 0;
+    dev->right.c.last_y = 0;
+    dev->right.last_rz = 0;
+
+    rb_init(&dev->left.c.rb);
+    rb_init(&dev->right.c.rb);
+
+    *ctx = dev;
+    return 0;
+}
+
+bool smart_pro_poll(void *ctx)
+{
+    struct smart_pro_device *dev = ctx;
+    uint8_t buf[128];
+    uint8_t frame_bytes[8];
+    device_dirty_reset(&dev->dirty, poll_switch(dev->left.c.gp, SP_GPIO_INPUT, &dev->left.last_switch));
+
+    struct pollfd pfds[2] = {
+        {.fd = dev->left.c.fd, .events = POLLIN},
+        {.fd = dev->right.c.fd, .events = POLLIN},
+    };
+    int pr = poll(pfds, 2, 0);
+    if (pr < 0) {
+        if (errno == EINTR) {
+            return true;
+        }
+        perror("poll smart_pro");
+        return false;
+    }
+
+    if (pfds[0].revents & POLLIN) {
+        ssize_t r = serial_poll_read(dev->left.c.fd, buf, sizeof(buf));
+        if (r < 0) {
+            perror("read left");
+            return false;
+        }
+        if (r > 0) {
+            rb_push(&dev->left.c.rb, buf, (size_t)r);
+            while (rb_try_extract_frame_variantA(&dev->left.c.rb, frame_bytes)) {
+                process_left_frame_bytes(&dev->left, frame_bytes, &dev->dirty);
+            }
+        }
+    }
+
+    if (pfds[1].revents & POLLIN) {
+        ssize_t r = serial_poll_read(dev->right.c.fd, buf, sizeof(buf));
+        if (r < 0) {
+            perror("read right");
+            return false;
+        }
+        if (r > 0) {
+            rb_push(&dev->right.c.rb, buf, (size_t)r);
+            while (rb_try_extract_frame_variantA(&dev->right.c.rb, frame_bytes)) {
+                process_right_frame_bytes(&dev->right, frame_bytes, &dev->dirty);
+            }
+        }
+    }
+
+    device_dirty_flush(&dev->dirty, dev->left.c.gp);
+    return true;
+}
+
+void smart_pro_close(void *ctx)
+{
+    struct smart_pro_device *dev = ctx;
+    if (!dev) return;
+    close(dev->left.c.fd);
+    close(dev->right.c.fd);
+    memset(dev, 0, sizeof(*dev));
+}
