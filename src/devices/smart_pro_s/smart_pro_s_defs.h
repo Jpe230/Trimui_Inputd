@@ -54,8 +54,8 @@ static const struct sp_s_button_map_entry SP_S_LEFT_BUTTON_MAP[] = {
 static const struct sp_s_button_map_entry SP_S_RIGHT_BUTTON_MAP[] = {
     {SP_S_BTN_A_MASK, BTN_SOUTH},
     {SP_S_BTN_B_MASK, BTN_EAST},
-    {SP_S_BTN_X_MASK, BTN_WEST},
-    {SP_S_BTN_Y_MASK, BTN_NORTH},
+    {SP_S_BTN_Y_MASK, BTN_WEST},
+    {SP_S_BTN_X_MASK, BTN_NORTH},
     {SP_S_BTN_R1_MASK, BTN_TR},
     {SP_S_BTN_R2_MASK, BTN_TR2},
     {SP_S_BTN_R3_MASK, BTN_THUMBR},
@@ -90,14 +90,24 @@ static const struct gamepad_abs_desc SP_S_AXES[] = {
 /* Switch list advertised by the Smart Pro S controller (tablet mode). */
 static const unsigned short SP_S_SWITCHES[] = {SW_TABLET_MODE};
 
+/* Force feedback capabilities exposed for Smart Pro S (advertise only). */
+static const unsigned short SP_S_FF_EFFECTS[] = {
+    FF_RUMBLE,
+    FF_PERIODIC,
+    FF_SQUARE,
+    FF_TRIANGLE,
+    FF_SINE,
+    FF_GAIN,
+};
+
 /* Input device descriptor presented to the OS for Smart Pro S. */
 static const struct gamepad_desc SMART_PRO_S_GAMEPAD_DESC = {
-    .name = "TRIMUI Smart Pro S Controller",
+    .name = "TRIMUI Player1",
     .id = {
         .bustype = 0x0003,
-        .vendor  = 0x0000,
-        .product = 0x0000,
-        .version = 2,
+        .vendor  = 0x045e,
+        .product = 0x028e,
+        .version = 0x0114,
     },
     .keys = SP_S_KEYS,
     .key_count = sizeof(SP_S_KEYS) / sizeof(SP_S_KEYS[0]),
@@ -105,4 +115,8 @@ static const struct gamepad_desc SMART_PRO_S_GAMEPAD_DESC = {
     .axis_count = sizeof(SP_S_AXES) / sizeof(SP_S_AXES[0]),
     .switches = SP_S_SWITCHES,
     .switch_count = sizeof(SP_S_SWITCHES) / sizeof(SP_S_SWITCHES[0]),
+    .ff_effects_max = 4,
+    .enable_ff_rumble = true,
+    .ff_effects = SP_S_FF_EFFECTS,
+    .ff_effect_count = sizeof(SP_S_FF_EFFECTS) / sizeof(SP_S_FF_EFFECTS[0]),
 };

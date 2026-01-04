@@ -64,7 +64,16 @@ struct gamepad *gamepad_init(const struct gamepad_desc *desc)
 
     if (desc->ff_effects_max > 0 && desc->enable_ff_rumble) {
         ioctl(fd, UI_SET_EVBIT, EV_FF);
-        ioctl(fd, UI_SET_FFBIT, FF_RUMBLE);
+
+        const unsigned short default_ff[] = {FF_RUMBLE};
+        const unsigned short *ff_effects = desc->ff_effects ? desc->ff_effects : default_ff;
+        size_t ff_count = (desc->ff_effects && desc->ff_effect_count > 0)
+                              ? desc->ff_effect_count
+                              : (sizeof(default_ff) / sizeof(default_ff[0]));
+
+        for (size_t i = 0; i < ff_count; ++i) {
+            ioctl(fd, UI_SET_FFBIT, ff_effects[i]);
+        }
     }
 
     struct uinput_setup setup;

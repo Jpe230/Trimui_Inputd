@@ -25,6 +25,8 @@ struct gamepad_desc {
     size_t switch_count;
     unsigned int ff_effects_max;
     bool enable_ff_rumble;
+    const unsigned short *ff_effects;
+    size_t ff_effect_count;
 };
 
 /**
