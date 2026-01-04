@@ -45,6 +45,15 @@ int main(int argc, char **argv)
     (void)argc;
     (void)argv;
 
+    if (setsid() == -1) {
+        perror("setsid");
+        return EXIT_FAILURE;
+    }
+
+    struct sigaction sa = {};
+    sa.sa_handler = SIG_IGN;
+    sigaction(SIGHUP, &sa, NULL);
+
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
 
