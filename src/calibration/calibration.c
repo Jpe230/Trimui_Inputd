@@ -28,28 +28,6 @@ static double clampd(double v, double lo, double hi)
     return v;
 }
 
-static bool cal_debug_should_log_ms(long interval_ms, int slot)
-{
-    if (interval_ms <= 0) {
-        return true;
-    }
-    static struct timespec last[2] = {{0, 0}, {0, 0}};
-    struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC, &now);
-    struct timespec *prev = &last[slot & 1];
-    if (prev->tv_sec == 0 && prev->tv_nsec == 0) {
-        *prev = now;
-        return true;
-    }
-    long delta_ms = (long)((now.tv_sec - prev->tv_sec) * 1000L +
-                           (now.tv_nsec - prev->tv_nsec) / 1000000L);
-    if (delta_ms >= interval_ms) {
-        *prev = now;
-        return true;
-    }
-    return false;
-}
-
 void cal_init(struct axis_state *axis)
 {
     axis->initialized = false;
@@ -162,6 +140,6 @@ int cal_apply(struct axis_state *axis, int raw)
 
     if (out > OUTPUT_MAX) out = OUTPUT_MAX;
     if (out < -OUTPUT_MAX) out = -OUTPUT_MAX;
-    
+
     return (int)out;
 }
