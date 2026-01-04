@@ -45,6 +45,7 @@ enum {
 /* Map left-hand packed button bits to uinput codes. */
 static const struct sp_s_button_map_entry SP_S_LEFT_BUTTON_MAP[] = {
     {SP_S_BTN_L1_MASK, BTN_TL},
+    {SP_S_BTN_L2_MASK, BTN_TL2},
     {SP_S_BTN_L3_MASK, BTN_THUMBL},
     {SP_S_BTN_MODE_MASK, BTN_MODE},
 };
@@ -56,6 +57,7 @@ static const struct sp_s_button_map_entry SP_S_RIGHT_BUTTON_MAP[] = {
     {SP_S_BTN_X_MASK, BTN_WEST},
     {SP_S_BTN_Y_MASK, BTN_NORTH},
     {SP_S_BTN_R1_MASK, BTN_TR},
+    {SP_S_BTN_R2_MASK, BTN_TR2},
     {SP_S_BTN_R3_MASK, BTN_THUMBR},
     {SP_S_BTN_START_MASK, BTN_START},
     {SP_S_BTN_SELECT_MASK, BTN_SELECT},
@@ -72,17 +74,15 @@ static const unsigned short SP_S_KEYS[] = {
     BTN_SOUTH, BTN_EAST, BTN_WEST, BTN_NORTH,
     BTN_TL, BTN_TR,
     BTN_START, BTN_SELECT, BTN_MODE,
-    BTN_THUMBR, BTN_THUMBL,
+    BTN_THUMBR, BTN_THUMBL, BTN_TL2, BTN_TR2
 };
 
-/* Absolute axis descriptions for both Smart Pro S sticks, triggers, and hat. */
+/* Absolute axis descriptions for both Smart Pro S sticks, and hat. */
 static const struct gamepad_abs_desc SP_S_AXES[] = {
     SP_S_AXIS_DESC(ABS_X, -32767, 32767),
     SP_S_AXIS_DESC(ABS_Y, -32767, 32767),
     SP_S_AXIS_DESC(ABS_RX, -32767, 32767),
     SP_S_AXIS_DESC(ABS_RY, -32767, 32767),
-    SP_S_AXIS_DESC(ABS_Z, 0, 255),
-    SP_S_AXIS_DESC(ABS_RZ, 0, 255),
     SP_S_AXIS_DESC(ABS_HAT0X, -1, 1),
     SP_S_AXIS_DESC(ABS_HAT0Y, -1, 1),
 };

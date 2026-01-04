@@ -22,8 +22,6 @@ If you are using an x86 host, you might need to run this first:
 docker run --privileged --rm tonistiigi/binfmt --install arm64
 ```
 
-The resulting binary lives at `build/tsp_inputd/bin/trimui_inputd_smart_pro`.
-
 If you prefer a native toolchain, install `gcc`, `make`, and standard headers for your aarch64 rootfs, then run:
 
 ```bash

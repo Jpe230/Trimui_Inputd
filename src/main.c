@@ -62,6 +62,12 @@ int main(int argc, char **argv)
 
     struct axis_state lx, ly, rx, ry;
 
+    lx.debug_id = 0;
+    ly.debug_id = 1;
+
+    rx.debug_id = 3;
+    ry.debug_id = 4;
+
     cal_init(&lx);
     cal_init(&ly);
     cal_init(&rx);

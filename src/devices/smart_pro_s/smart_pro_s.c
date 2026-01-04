@@ -100,7 +100,6 @@ static void process_left_frame_bytes(struct smart_pro_s_left_ctx *ctx, const uin
     uint32_t diff = btn_raw ^ ctx->c.prev_buttons;
     device_hat_apply_masks(&ctx->hat, btn_raw, diff, SP_S_BTN_DPAD_UP_MASK, SP_S_BTN_DPAD_DOWN_MASK, SP_S_BTN_DPAD_LEFT_MASK, SP_S_BTN_DPAD_RIGHT_MASK);
 
-    emit_trigger_abs255(ctx->c.gp, btn_raw, diff, SP_S_BTN_L2_MASK, ABS_Z, &ctx->last_z, dirty);
     emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_S_LEFT_BUTTON_MAP, SP_S_LEFT_BUTTON_MAP_COUNT, dirty);
 
     if (diff & SP_S_DPAD_MASK) {
@@ -120,7 +119,6 @@ static void process_right_frame_bytes(struct smart_pro_s_right_ctx *ctx, const u
 
     uint32_t diff = btn_raw ^ ctx->c.prev_buttons;
 
-    emit_trigger_abs255(ctx->c.gp, btn_raw, diff, SP_S_BTN_R2_MASK, ABS_RZ, &ctx->last_rz, dirty);
     emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_S_RIGHT_BUTTON_MAP, SP_S_RIGHT_BUTTON_MAP_COUNT, dirty);
 
     ctx->c.prev_buttons = btn_raw;
