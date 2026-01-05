@@ -17,6 +17,7 @@
 static struct smart_pro_device smart_pro_ctx;
 static const struct device_axis_cfg SP_AXIS_LEFT_CFG = {.abs_code_x = ABS_X, .abs_code_y = ABS_Y, .invert_x = true, .invert_y = true};
 static const struct device_axis_cfg SP_AXIS_RIGHT_CFG = {.abs_code_x = ABS_Z, .abs_code_y = ABS_RZ, .invert_x = true, .invert_y = true};
+static const unsigned SWITCH_POLL_INTERVAL = 2u; /* Poll hardware switch every 60 iterations. (We are running at aprox ~62.5, we poll every second) */
 
 static int smart_pro_gpio_init(int *switch_initial)
 {
@@ -70,18 +71,30 @@ static void process_left_frame_bytes(struct smart_pro_left_ctx *ctx, const uint8
     uint16_t raw_x = ((uint16_t)frame_bytes[3] << 8) | frame_bytes[4];
     uint16_t raw_y = ((uint16_t)frame_bytes[5] << 8) | frame_bytes[6];
 
-    device_axes_process_pair(ctx->c.gp, ctx->c.ax, ctx->c.ay, raw_x, raw_y, &SP_AXIS_LEFT_CFG, &ctx->c.last_x, &ctx->c.last_y, dirty);
-
     uint8_t diff = btn_raw ^ ctx->c.prev_buttons;
-    device_hat_apply_masks(&ctx->hat, btn_raw, diff, SP_BTN_DPAD_UP_MASK, SP_BTN_DPAD_DOWN_MASK, SP_BTN_DPAD_LEFT_MASK, SP_BTN_DPAD_RIGHT_MASK);
+    bool axes_changed = !ctx->c.have_prev_raw || raw_x != ctx->c.prev_raw_x || raw_y != ctx->c.prev_raw_y;
 
-    emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_LEFT_BUTTON_MAP, SP_LEFT_BUTTON_MAP_COUNT, dirty);
+    if (!axes_changed && diff == 0) {
+        return;
+    }
 
-    if (diff & SP_DPAD_MASK) {
-        device_dirty_merge(dirty, device_hat_emit(ctx->c.gp, &ctx->hat));
+    if (axes_changed) {
+        device_axes_process_pair(ctx->c.gp, ctx->c.ax, ctx->c.ay, raw_x, raw_y, &SP_AXIS_LEFT_CFG, &ctx->c.last_x, &ctx->c.last_y, dirty);
+    }
+
+    if (diff) {
+        device_hat_apply_masks(&ctx->hat, btn_raw, diff, SP_BTN_DPAD_UP_MASK, SP_BTN_DPAD_DOWN_MASK, SP_BTN_DPAD_LEFT_MASK, SP_BTN_DPAD_RIGHT_MASK);
+        emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_LEFT_BUTTON_MAP, SP_LEFT_BUTTON_MAP_COUNT, dirty);
+
+        if (diff & SP_DPAD_MASK) {
+            device_dirty_merge(dirty, device_hat_emit(ctx->c.gp, &ctx->hat));
+        }
     }
 
     ctx->c.prev_buttons = btn_raw;
+    ctx->c.prev_raw_x = raw_x;
+    ctx->c.prev_raw_y = raw_y;
+    ctx->c.have_prev_raw = true;
 }
 
 static void process_right_frame_bytes(struct smart_pro_right_ctx *ctx, const uint8_t frame_bytes[8], struct device_dirty_state *dirty)
@@ -90,13 +103,25 @@ static void process_right_frame_bytes(struct smart_pro_right_ctx *ctx, const uin
     uint16_t raw_x = ((uint16_t)frame_bytes[3] << 8) | frame_bytes[4];
     uint16_t raw_y = ((uint16_t)frame_bytes[5] << 8) | frame_bytes[6];
 
-    device_axes_process_pair(ctx->c.gp, ctx->c.ax, ctx->c.ay, raw_x, raw_y, &SP_AXIS_RIGHT_CFG, &ctx->c.last_x, &ctx->c.last_y, dirty);
-
     uint8_t diff = btn_raw ^ ctx->c.prev_buttons;
+    bool axes_changed = !ctx->c.have_prev_raw || raw_x != ctx->c.prev_raw_x || raw_y != ctx->c.prev_raw_y;
 
-    emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_RIGHT_BUTTON_MAP, SP_RIGHT_BUTTON_MAP_COUNT, dirty);
+    if (!axes_changed && diff == 0) {
+        return;
+    }
+
+    if (axes_changed) {
+        device_axes_process_pair(ctx->c.gp, ctx->c.ax, ctx->c.ay, raw_x, raw_y, &SP_AXIS_RIGHT_CFG, &ctx->c.last_x, &ctx->c.last_y, dirty);
+    }
+
+    if (diff) {
+        emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_RIGHT_BUTTON_MAP, SP_RIGHT_BUTTON_MAP_COUNT, dirty);
+    }
 
     ctx->c.prev_buttons = btn_raw;
+    ctx->c.prev_raw_x = raw_x;
+    ctx->c.prev_raw_y = raw_y;
+    ctx->c.have_prev_raw = true;
 }
 
 int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct axis_state *ly, struct axis_state *rx, struct axis_state *ry, bool verbose)
@@ -132,8 +157,12 @@ int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct
     dev->left.c.prev_buttons = 0;
     dev->left.c.last_x = 0;
     dev->left.c.last_y = 0;
+    dev->left.c.prev_raw_x = 0;
+    dev->left.c.prev_raw_y = 0;
+    dev->left.c.have_prev_raw = false;
     dev->left.last_z = 0;
     dev->left.last_switch = switch_initial;
+    dev->left.switch_poll_divider = 0;
     dev->left.hat = (struct device_hat_state){.x = 0, .y = 0, .left = 0, .right = 0, .up = 0, .down = 0};
 
     dev->right.c.fd = fd_right;
@@ -145,6 +174,9 @@ int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct
     dev->right.c.prev_buttons = 0;
     dev->right.c.last_x = 0;
     dev->right.c.last_y = 0;
+    dev->right.c.prev_raw_x = 0;
+    dev->right.c.prev_raw_y = 0;
+    dev->right.c.have_prev_raw = false;
     dev->right.last_rz = 0;
 
     rb_init(&dev->left.c.rb);
@@ -165,7 +197,11 @@ bool smart_pro_poll(void *ctx)
     struct smart_pro_device *dev = ctx;
     uint8_t buf[128];
     uint8_t frame_bytes[8];
-    device_dirty_reset(&dev->dirty, poll_switch(dev->left.c.gp, SP_GPIO_INPUT, &dev->left.last_switch));
+    bool switch_dirty = false;
+    if ((dev->left.switch_poll_divider++ % SWITCH_POLL_INTERVAL) == 0) {
+        switch_dirty = poll_switch(dev->left.c.gp, SP_GPIO_INPUT, &dev->left.last_switch);
+    }
+    device_dirty_reset(&dev->dirty, switch_dirty);
 
     if (!device_rumble_poll(&dev->rumble, dev->left.c.gp)) {
         return false;

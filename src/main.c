@@ -18,7 +18,7 @@
 
 static volatile sig_atomic_t g_running = 1;
 static bool g_verbose = false;
-static const useconds_t LOOP_US = 4000;
+static const useconds_t LOOP_US = 16000;
 
 enum variant {
     VAR_SMART_PRO_S,

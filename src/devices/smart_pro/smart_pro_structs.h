@@ -23,6 +23,9 @@ struct sp_ctx_common {
     uint8_t prev_buttons;
     int last_x;
     int last_y;
+    uint16_t prev_raw_x;
+    uint16_t prev_raw_y;
+    bool have_prev_raw;
 };
 
 /* Runtime context for the Smart Pro left controller half. */
@@ -30,6 +33,7 @@ struct smart_pro_left_ctx {
     struct sp_ctx_common c;
     int last_z;
     int last_switch;
+    unsigned int switch_poll_divider;
     struct device_hat_state hat;
 };
 
