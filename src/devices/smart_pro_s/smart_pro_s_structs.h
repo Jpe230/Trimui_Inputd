@@ -32,7 +32,6 @@ struct smart_pro_s_left_ctx {
     struct sp_s_ctx_common c;
     int last_z;
     int last_switch;
-    unsigned int switch_poll_divider;
     struct device_hat_state hat;
 };
 
