@@ -78,18 +78,6 @@ static void emit_buttons_from_map(struct gamepad *gp, uint32_t btn_raw, uint32_t
     }
 }
 
-static void emit_trigger_abs255(struct gamepad *gp, uint32_t btn_raw, uint32_t diff, uint32_t mask, int abs_code, int *last_val, struct device_dirty_state *dirty)
-{
-    if (diff & mask) {
-        int val = (btn_raw & mask) ? 255 : 0;
-        if (val != *last_val) {
-            *last_val = val;
-            gamepad_emit_abs(gp, abs_code, val);
-            device_dirty_mark(dirty);
-        }
-    }
-}
-
 static void process_left_frame_bytes(struct smart_pro_s_left_ctx *ctx, const uint8_t frame_bytes[20], struct device_dirty_state *dirty)
 {
     uint32_t btn_raw = rd_le32(&frame_bytes[2]);

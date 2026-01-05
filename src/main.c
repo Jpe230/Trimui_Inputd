@@ -61,7 +61,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    struct sigaction sa = {};
+    struct sigaction sa = {0};
     sa.sa_handler = SIG_IGN;
     sigaction(SIGHUP, &sa, NULL);
 
