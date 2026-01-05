@@ -102,7 +102,7 @@ static const unsigned short SP_S_FF_EFFECTS[] = {
 
 /* Input device descriptor presented to the OS for Smart Pro S. */
 static const struct gamepad_desc SMART_PRO_S_GAMEPAD_DESC = {
-    .name = "TRIMUI Smart Pro Controller",
+    .name = "TRIMUI Smart Pro S Controller",
     .id = {
         .bustype = 0x0003,
         .vendor  = 0x045e,
