@@ -21,6 +21,7 @@ struct brick_state {
     int hat_pins[4];
     struct device_hat_state hat;
     struct device_dirty_state dirty;
+    int last_switch;
     bool active_low;
     struct device_rumble_state rumble;
 };

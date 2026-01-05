@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include "../../drivers/serial/serial.h"
+#include "../../drivers/sunxi-gpio/sunxi-gpio.h"
 #include "../../gamepad/uinput.h"
 #include "../../calibration/calibration.h"
 #include "../../drivers/gpio/gpio.h"
@@ -17,7 +18,6 @@
 static struct smart_pro_device smart_pro_ctx;
 static const struct device_axis_cfg SP_AXIS_LEFT_CFG = {.abs_code_x = ABS_X, .abs_code_y = ABS_Y, .invert_x = true, .invert_y = true};
 static const struct device_axis_cfg SP_AXIS_RIGHT_CFG = {.abs_code_x = ABS_Z, .abs_code_y = ABS_RZ, .invert_x = true, .invert_y = true};
-static const unsigned SWITCH_POLL_INTERVAL = 2u; /* Poll hardware switch every 60 iterations. (We are running at aprox ~62.5, we poll every second) */
 
 static int smart_pro_gpio_init(int *switch_initial)
 {
@@ -27,29 +27,29 @@ static int smart_pro_gpio_init(int *switch_initial)
             return -1;
         }
     }
-    if (gpio_export(SP_GPIO_INPUT) < 0 || gpio_set_direction(SP_GPIO_INPUT, false) < 0) {
+    if (sunxi_gpio_init() < 0) {
         return -1;
     }
-    int val = 0;
-    if (gpio_read(SP_GPIO_INPUT, &val) == 0) {
-        *switch_initial = val;
-    } else {
-        *switch_initial = -1;
+    if (sunxi_gpio_set_cfgpin((uint32_t)SP_GPIO_INPUT, SUNXI_GPIO_INPUT) < 0) {
+        sunxi_gpio_close();
+        return -1;
     }
+    int val = sunxi_gpio_input((uint32_t)SP_GPIO_INPUT);
+    *switch_initial = (val >= 0) ? val : -1;
     return 0;
 }
 
 static bool poll_switch(struct gamepad *gp, int pin, int *last_val)
 {
-    int val = 0;
-    if (gpio_read(pin, &val) < 0) {
+    int val = sunxi_gpio_input((uint32_t)pin);
+    if (val < 0) {
         return false;
     }
     if (*last_val == val) {
         return false;
     }
     *last_val = val;
-    gamepad_emit_sw(gp, 1, val);
+    gamepad_emit_sw(gp, SW_TABLET_MODE, val);
     return true;
 }
 
@@ -162,7 +162,6 @@ int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct
     dev->left.c.have_prev_raw = false;
     dev->left.last_z = 0;
     dev->left.last_switch = switch_initial;
-    dev->left.switch_poll_divider = 0;
     dev->left.hat = (struct device_hat_state){.x = 0, .y = 0, .left = 0, .right = 0, .up = 0, .down = 0};
 
     dev->right.c.fd = fd_right;
@@ -197,11 +196,7 @@ bool smart_pro_poll(void *ctx)
     struct smart_pro_device *dev = ctx;
     uint8_t buf[128];
     uint8_t frame_bytes[8];
-    bool switch_dirty = false;
-    if ((dev->left.switch_poll_divider++ % SWITCH_POLL_INTERVAL) == 0) {
-        switch_dirty = poll_switch(dev->left.c.gp, SP_GPIO_INPUT, &dev->left.last_switch);
-    }
-    device_dirty_reset(&dev->dirty, switch_dirty);
+    device_dirty_reset(&dev->dirty, poll_switch(dev->left.c.gp, SP_GPIO_INPUT, &dev->left.last_switch));
 
     if (!device_rumble_poll(&dev->rumble, dev->left.c.gp)) {
         return false;
@@ -259,5 +254,6 @@ void smart_pro_close(void *ctx)
     close(dev->left.c.fd);
     close(dev->right.c.fd);
     device_rumble_close(&dev->rumble);
+    sunxi_gpio_close();
     memset(dev, 0, sizeof(*dev));
 }

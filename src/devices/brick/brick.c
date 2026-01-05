@@ -27,6 +27,20 @@ static int init_pin(int pin)
     return sunxi_gpio_set_cfgpin((uint32_t)pin, SUNXI_GPIO_INPUT);
 }
 
+static bool poll_switch(struct brick_state *st)
+{
+    int val = sunxi_gpio_input((uint32_t)BRICK_GPIO_SWITCH);
+    if (val < 0) {
+        return false;
+    }
+    if (st->last_switch == val) {
+        return false;
+    }
+    st->last_switch = val;
+    gamepad_emit_sw(st->gp, SW_TABLET_MODE, val);
+    return true;
+}
+
 int brick_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct axis_state *ly, struct axis_state *rx, struct axis_state *ry, bool verbose)
 {
     (void)lx;
@@ -65,6 +79,12 @@ int brick_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct axi
             return -1;
         }
     }
+    if (init_pin(BRICK_GPIO_SWITCH) < 0) {
+        sunxi_gpio_close();
+        return -1;
+    }
+
+    st->last_switch = -1;
 
     st->hat = (struct device_hat_state){.x = 0, .y = 0, .left = 0, .right = 0, .up = 0, .down = 0};
     *ctx = st;
@@ -77,7 +97,7 @@ bool brick_poll(void *ctx)
     if (!device_rumble_poll(&st->rumble, st->gp)) {
         return false;
     }
-    device_dirty_reset(&st->dirty, false);
+    device_dirty_reset(&st->dirty, poll_switch(st));
     for (size_t i = 0; i < BRICK_BUTTON_COUNT; ++i) {
         if (st->buttons[i].gpio < 0) {
             continue;

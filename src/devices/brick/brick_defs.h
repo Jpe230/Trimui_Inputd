@@ -56,6 +56,10 @@ enum {
     BRICK_HAT_PIN_COUNT = sizeof(BRICK_HAT_PINS) / sizeof(BRICK_HAT_PINS[0]),
 };
 
+enum { BRICK_GPIO_SWITCH = 243 }; /* Same GPIO used by Smart Pro tablet switch. */
+
+static const unsigned short BRICK_SWITCHES[] = {SW_TABLET_MODE};
+
 /* Gamepad description presented to the OS for the Brick controller. */
 static const struct gamepad_desc BRICK_GAMEPAD_DESC = {
     .name = "TRIMUI Brick Controller",
@@ -69,8 +73,8 @@ static const struct gamepad_desc BRICK_GAMEPAD_DESC = {
     .key_count = sizeof(BRICK_KEYS) / sizeof(BRICK_KEYS[0]),
     .axes = BRICK_AXES,
     .axis_count = sizeof(BRICK_AXES) / sizeof(BRICK_AXES[0]),
-    .switches = NULL,
-    .switch_count = 0,
+    .switches = BRICK_SWITCHES,
+    .switch_count = sizeof(BRICK_SWITCHES) / sizeof(BRICK_SWITCHES[0]),
     .ff_effects_max = DEVICE_RUMBLE_EFFECT_SLOTS,
     .enable_ff_rumble = true,
 };
