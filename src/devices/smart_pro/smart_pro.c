@@ -19,7 +19,7 @@ static struct smart_pro_device smart_pro_ctx;
 static const struct device_axis_cfg SP_AXIS_LEFT_CFG = {.abs_code_x = ABS_X, .abs_code_y = ABS_Y, .invert_x = true, .invert_y = true};
 static const struct device_axis_cfg SP_AXIS_RIGHT_CFG = {.abs_code_x = ABS_Z, .abs_code_y = ABS_RZ, .invert_x = true, .invert_y = true};
 
-static int smart_pro_gpio_init(int *switch_initial)
+static int smart_pro_gpio_init(void)
 {
     const int output_pins[] = {SP_GPIO_OUT1, SP_GPIO_OUT2};
     for (size_t i = 0; i < sizeof(output_pins) / sizeof(output_pins[0]); ++i) {
@@ -34,8 +34,7 @@ static int smart_pro_gpio_init(int *switch_initial)
         sunxi_gpio_close();
         return -1;
     }
-    int val = sunxi_gpio_input((uint32_t)SP_GPIO_INPUT);
-    *switch_initial = (val >= 0) ? val : -1;
+
     return 0;
 }
 
@@ -126,22 +125,25 @@ static void process_right_frame_bytes(struct smart_pro_right_ctx *ctx, const uin
 
 int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct axis_state *ly, struct axis_state *rx, struct axis_state *ry, bool verbose)
 {
-    int switch_initial = -1;
-    if (smart_pro_gpio_init(&switch_initial) < 0) {
+    if (smart_pro_gpio_init() < 0) {
         return -1;
     }
+
     int fd_left = serial_open_nonblocking("/dev/ttyS4");
     if (fd_left < 0) {
+        sunxi_gpio_close();
         return -1;
     }
     int fd_right = serial_open_nonblocking("/dev/ttyS3");
     if (fd_right < 0) {
         close(fd_left);
+        sunxi_gpio_close();
         return -1;
     }
     if (serial_config(fd_left) < 0 || serial_config(fd_right) < 0) {
         close(fd_left);
         close(fd_right);
+        sunxi_gpio_close();
         return -1;
     }
 
@@ -161,7 +163,7 @@ int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct
     dev->left.c.prev_raw_y = 0;
     dev->left.c.have_prev_raw = false;
     dev->left.last_z = 0;
-    dev->left.last_switch = switch_initial;
+    dev->left.last_switch = -1;
     dev->left.hat = (struct device_hat_state){.x = 0, .y = 0, .left = 0, .right = 0, .up = 0, .down = 0};
 
     dev->right.c.fd = fd_right;
@@ -184,6 +186,7 @@ int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct
     if (device_rumble_init(&dev->rumble, rumble_a133_driver()) < 0) {
         close(fd_left);
         close(fd_right);
+        sunxi_gpio_close();
         return -1;
     }
 
