@@ -1,50 +1,44 @@
 #pragma once
-
 #include <stdbool.h>
 
 struct axis_state {
     bool initialized;
     int samples;
+
+    // Robust boot init
+    int boot_count;
+    double boot_buf[31];  // must match BOOT_SAMPLES in calibration.c
+
+    // Learned calibration
     double center;
+
+    // Soft-limit model: effective spans from center (not raw min/max)
+    double neg_span;   // typical reach below center
+    double pos_span;   // typical reach above center
+
+    // Derived (debug/compat)
     double min;
     double max;
+
+    // Noise-based deadzone in raw units
     double deadzone;
+
+    // Filter + idle detection
+    double filt;
+    double prev_filt;
+    int idle_count;
+
+    // Idle noise estimate
+    double noise_ema;
+
+    // Parking recenter (fixes post-rotation joystick drift)
+    double park_sum;
+    int park_count;
+
     int debug_id;
 };
 
-/**
- * Initialize a calibration axis state with default bounds.
- *
- * @param axis Axis calibration structure to reset.
- * @return void.
- */
 void cal_init(struct axis_state *axis);
-
-/**
- * Add a new raw sample to a single-axis calibration state.
- *
- * @param axis Axis calibration structure to update.
- * @param raw Raw input sample to incorporate.
- * @return void.
- */
 void cal_update(struct axis_state *axis, int raw);
-
-/**
- * Add new raw samples for a paired X/Y stick calibration state.
- *
- * @param ax Calibration data for the X axis.
- * @param ay Calibration data for the Y axis.
- * @param raw_x Raw X-axis sample to incorporate.
- * @param raw_y Raw Y-axis sample to incorporate.
- * @return void.
- */
 void cal_update2(struct axis_state *ax, struct axis_state *ay, int raw_x, int raw_y);
-
-/**
- * Apply calibration to a raw axis value.
- *
- * @param axis Calibration data to use for correction.
- * @param raw Raw input value.
- * @return Adjusted value after calibration.
- */
-int cal_apply(struct axis_state *axis, int raw);
+int  cal_apply(struct axis_state *axis, int raw);

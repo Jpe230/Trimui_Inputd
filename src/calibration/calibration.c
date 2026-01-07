@@ -1,107 +1,226 @@
+/* calibration.c */
 #include "calibration.h"
 
 #include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
+#include <stdlib.h> // qsort
+#include <string.h> // memset
 
 #define RAW_MIN            0.0
 #define RAW_MAX            4095.0
 #define RAW_CENTER_DEFAULT ((RAW_MAX - RAW_MIN) / 2.0)
 #define OUTPUT_MAX         32767.0
 
-#define DEADZONE_BASE      100.0    /* Small fixed deadzone to squash noise. */
-#define DEADZONE_RATIO     0.06     /* Portion of the smallest half-span to use as deadzone. */
-#define DEADZONE_LIMIT     400.0    /* Cap the deadzone so it never eats too much travel. */
-#define MIN_ACTIVE_SPAN    64.0     /* Fallback span to avoid divide-by-zero when learning. */
-#define START_WINDOW       1800.0   /* Initial assumed usable span on boot. */
-#define DECAY_SPAN_MULT    1.3      /* Allow decay only while spans are near the assumed window. */
+#define BOOT_SAMPLES 31   // ~0.5s at 60Hz
 
-#define CENTER_WINDOW      32.0     /* How far from center we still consider the stick "at rest". */
-#define CENTER_FILTER      0.05     /* EMA factor to slowly learn the resting center. */
-#define EXTREME_DECAY_STEP 0.005    /* How quickly min/max crawl back toward center when idle. */
+// --- Tuning for ~60 Hz loop ---
+// Input filtering (helps velocity detection & spike resistance)
+#define FILTER_ALPHA       0.25     // 0.15..0.35
+
+// "True idle" gating (prevents center drift while moving slowly through center)
+#define CENTER_LEARN_BAND  20.0     // raw units from center
+#define VEL_THRESH         4.0      // raw units per sample (after filtering)
+#define IDLE_REQUIRED      12       // ~200ms at 60Hz
+#define CENTER_ALPHA       0.003    // slow center tracking only when idle
+
+// Deadzone based on measured idle jitter (stable vs span changes)
+#define DEADZONE_NOISE_BASE  6.0
+#define NOISE_ALPHA          0.08
+#define NOISE_MULT           6.0
+#define DEADZONE_USER_MIN    25.0   // raise if you want more "slack masking"
+#define DEADZONE_USER_MAX    250.0
+
+// Effective range (soft-limit) learning
+#define START_HALF_SPAN     900.0   // initial guess (roughly START_WINDOW/2)
+#define MIN_ACTIVE_SPAN     80.0    // avoid tiny span
+#define OUTER_GATE_RATIO    0.65    // only learn spans when far out
+#define SPAN_ALPHA_UP       0.0020  // slow growth (adapts over seconds)
+#define SPAN_ALPHA_DOWN     0.0005  // very slow shrink
+#define SPAN_MAX            2400.0  // safety cap (raw units)
+
+// Output soft knee (makes edge less harsh even though we clamp)
+#define KNEE_START          0.90    // start softening near 90%
+
+#define PARK_BAND        100.0   // raw units around center to consider "parked"
+#define PARK_REQUIRED    60      // ~1s at 60Hz
+#define PARK_ALPHA       0.06    // how fast center moves once parked (0.01..0.05)
 
 static double clampd(double v, double lo, double hi)
 {
+    if (!isfinite(v)) return lo;
     if (v < lo) return lo;
     if (v > hi) return hi;
     return v;
 }
 
-void cal_init(struct axis_state *axis)
+static int cmp_double(const void *a, const void *b)
 {
-    axis->initialized = false;
-    axis->samples = 0;
-    axis->center = RAW_CENTER_DEFAULT;
-    axis->min = RAW_MAX;
-    axis->max = RAW_MIN;
-    axis->deadzone = DEADZONE_BASE;
-    axis->debug_id = 0;
+    double da = *(const double *)a;
+    double db = *(const double *)b;
+    return (da < db) ? -1 : (da > db) ? 1 : 0;
 }
 
-void cal_update(struct axis_state *axis, int raw)
+static double median_of(double *buf, int n)
+{
+    qsort(buf, (size_t)n, sizeof(double), cmp_double);
+    if (n & 1) return buf[n / 2];
+    return 0.5 * (buf[n / 2 - 1] + buf[n / 2]);
+}
+
+// smootherstep: 0..1 -> 0..1 with zero slope at both ends
+static double smootherstep(double t)
+{
+    t = clampd(t, 0.0, 1.0);
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+// Apply a "soft knee" near 1.0 (keeps f(1)=1, but slope goes to 0 at the edge)
+static double soft_knee_0to1(double a)
+{
+    a = clampd(a, 0.0, 1.0);
+    if (a <= KNEE_START) return a;
+    double t = (a - KNEE_START) / (1.0 - KNEE_START);   // 0..1
+    double s = smootherstep(t);
+    return KNEE_START + (1.0 - KNEE_START) * s;
+}
+
+static void recompute_minmax(struct axis_state *a)
+{
+    a->neg_span = clampd(a->neg_span, MIN_ACTIVE_SPAN, SPAN_MAX);
+    a->pos_span = clampd(a->pos_span, MIN_ACTIVE_SPAN, SPAN_MAX);
+
+    a->center = clampd(a->center, RAW_MIN, RAW_MAX);
+
+    a->min = clampd(a->center - a->neg_span, RAW_MIN, a->center);
+    a->max = clampd(a->center + a->pos_span, a->center, RAW_MAX);
+}
+
+void cal_init(struct axis_state *a)
+{
+    memset(a, 0, sizeof(*a));
+
+    a->initialized = false;
+    a->samples = 0;
+
+    a->boot_count = 0;
+    for (int i = 0; i < BOOT_SAMPLES; i++) a->boot_buf[i] = RAW_CENTER_DEFAULT;
+
+    a->center = RAW_CENTER_DEFAULT;
+
+    a->neg_span = START_HALF_SPAN;
+    a->pos_span = START_HALF_SPAN;
+
+    a->deadzone = DEADZONE_USER_MIN;
+
+    a->filt = RAW_CENTER_DEFAULT;
+    a->prev_filt = RAW_CENTER_DEFAULT;
+    a->idle_count = 0;
+
+    a->noise_ema = 0.0;
+
+    a->park_sum = 0.0;
+    a->park_count = 0;
+
+    recompute_minmax(a);
+}
+
+void cal_update(struct axis_state *a, int raw)
 {
     double val = clampd((double)raw, RAW_MIN, RAW_MAX);
 
-    if (!axis->initialized) {
-        axis->initialized = true;
-        axis->samples = 1;
-        axis->center = val;
-        double half = START_WINDOW * 0.5;
-        axis->min = clampd(axis->center - half, RAW_MIN, RAW_MAX);
-        axis->max = clampd(axis->center + half, RAW_MIN, RAW_MAX);
-        axis->deadzone = DEADZONE_BASE;
+    // Boot phase: collect BOOT_SAMPLES, then init from median center.
+    if (!a->initialized) {
+        if (a->boot_count < BOOT_SAMPLES) {
+            a->boot_buf[a->boot_count++] = val;
+            return; // keep output at 0 during boot
+        }
+
+        a->initialized = true;
+        a->samples = BOOT_SAMPLES;
+
+        a->center = median_of(a->boot_buf, BOOT_SAMPLES);
+        a->filt = a->center;
+        a->prev_filt = a->center;
+
+        a->neg_span = START_HALF_SPAN;
+        a->pos_span = START_HALF_SPAN;
+
+        a->deadzone = DEADZONE_USER_MIN;
+        a->noise_ema = 0.0;
+        a->idle_count = 0;
+
+        recompute_minmax(a);
         return;
     }
 
-    axis->samples++;
+    a->samples++;
 
-    /* Capture a stable center whenever the stick looks idle. */
-    double near_center_band = axis->deadzone + CENTER_WINDOW;
-    if (fabs(val - axis->center) <= near_center_band) {
-        axis->center = axis->center + (val - axis->center) * CENTER_FILTER;
+    // Filter for stability
+    a->filt = a->filt + FILTER_ALPHA * (val - a->filt);
+    double vel = fabs(a->filt - a->prev_filt);
+    a->prev_filt = a->filt;
+
+    // True idle detection
+    bool near_center = fabs(a->filt - a->center) <= CENTER_LEARN_BAND;
+    bool slow = vel <= VEL_THRESH;
+
+    if (near_center && slow) a->idle_count++;
+    else a->idle_count = 0;
+
+    bool idle = a->idle_count >= IDLE_REQUIRED;
+
+    // When idle: learn center + noise-based deadzone
+    if (idle) {
+        a->center = a->center + CENTER_ALPHA * (a->filt - a->center);
+
+        double dev = fabs(a->filt - a->center);
+        a->noise_ema = a->noise_ema + NOISE_ALPHA * (dev - a->noise_ema);
+
+        double dz = DEADZONE_NOISE_BASE + NOISE_MULT * a->noise_ema;
+        a->deadzone = clampd(dz, DEADZONE_USER_MIN, DEADZONE_USER_MAX);
     }
 
-    /* Track observed extremes. */
-    if (val < axis->min) axis->min = val;
-    if (val > axis->max) axis->max = val;
+    // Park center to possibly fix stick drift after rotation
+    bool park_near = fabs(a->filt - a->center) <= PARK_BAND;
+    bool park_slow = vel <= VEL_THRESH;
 
-    /* Keep bounds consistent with the current center. */
-    if (axis->center < axis->min) axis->center = axis->min;
-    if (axis->center > axis->max) axis->center = axis->max;
+    if (park_near && park_slow) {
+        a->park_sum += a->filt;
+        a->park_count++;
 
-    /* Let extremes decay back toward center when we are idle near center. */
-    if (fabs(val - axis->center) <= near_center_band) {
-        double half = START_WINDOW * 0.5;
-        double decay_cap = half * DECAY_SPAN_MULT;
-        double lower_span_now = axis->center - axis->min;
-        double upper_span_now = axis->max - axis->center;
+        if (a->park_count >= PARK_REQUIRED) {
+            double target = a->park_sum / (double)a->park_count;
+            a->center = a->center + PARK_ALPHA * (target - a->center);
 
-        if (lower_span_now <= decay_cap) {
-            double target_min = clampd(axis->center - half, RAW_MIN, axis->center);
-            double new_min = fmin(axis->center, axis->min + EXTREME_DECAY_STEP);
-            axis->min = fmin(new_min, target_min);
+            // reset so it keeps refining if it stays parked
+            a->park_sum = 0.0;
+            a->park_count = 0;
         }
-        if (upper_span_now <= decay_cap) {
-            double target_max = clampd(axis->center + half, axis->center, RAW_MAX);
-            double new_max = fmax(axis->center, axis->max - EXTREME_DECAY_STEP);
-            axis->max = fmax(new_max, target_max);
+    } else {
+        a->park_sum = 0.0;
+        a->park_count = 0;
+    }
+
+    // Learn effective spans only when far from center
+    double d = a->filt - a->center;
+
+    if (d > 0.0) {
+        double gate = a->pos_span * OUTER_GATE_RATIO;
+        if (d >= gate) {
+            double cand = d;
+            double alpha = (cand > a->pos_span) ? SPAN_ALPHA_UP : SPAN_ALPHA_DOWN;
+            a->pos_span = a->pos_span + alpha * (cand - a->pos_span);
+        }
+    } else if (d < 0.0) {
+        double ad = -d;
+        double gate = a->neg_span * OUTER_GATE_RATIO;
+        if (ad >= gate) {
+            double cand = ad;
+            double alpha = (cand > a->neg_span) ? SPAN_ALPHA_UP : SPAN_ALPHA_DOWN;
+            a->neg_span = a->neg_span + alpha * (cand - a->neg_span);
         }
     }
 
-    double lower_span = axis->center - axis->min;
-    double upper_span = axis->max - axis->center;
-    double min_span = fmin(lower_span, upper_span);
-    double dz = DEADZONE_BASE;
-    if (min_span > 0.0) {
-        double computed = min_span * DEADZONE_RATIO;
-        dz = clampd(computed, DEADZONE_BASE, DEADZONE_LIMIT);
-        double max_allowed = min_span * 0.5;
-        if (max_allowed > DEADZONE_BASE && dz > max_allowed) {
-            dz = max_allowed;
-        }
-    }
-    axis->deadzone = dz;
+    recompute_minmax(a);
 }
 
 void cal_update2(struct axis_state *ax, struct axis_state *ay, int raw_x, int raw_y)
@@ -110,36 +229,37 @@ void cal_update2(struct axis_state *ax, struct axis_state *ay, int raw_x, int ra
     cal_update(ay, raw_y);
 }
 
-int cal_apply(struct axis_state *axis, int raw)
+int cal_apply(struct axis_state *a, int raw)
 {
-    if (!axis->initialized) {
-        return 0;
-    }
+    if (!a->initialized) return 0;
 
     double val = clampd((double)raw, RAW_MIN, RAW_MAX);
-    double center = axis->center;
-    double deadzone = axis->deadzone;
+    double d = val - a->center;
 
-    double lower_span = center - axis->min;
-    double upper_span = axis->max - center;
+    double dz = a->deadzone;
 
-    double pos_span = fmax(upper_span, MIN_ACTIVE_SPAN) - deadzone;
-    double neg_span = fmax(lower_span, MIN_ACTIVE_SPAN) - deadzone;
+    // Deadzone
+    double ad = fabs(d);
+    if (ad <= dz) return 0;
 
-    if (pos_span < 1.0) pos_span = 1.0;
-    if (neg_span < 1.0) neg_span = 1.0;
+    // Normalize using effective span (minus deadzone)
+    double span = (d >= 0.0) ? a->pos_span : a->neg_span;
+    span = fmax(span, MIN_ACTIVE_SPAN);
 
-    double out = 0.0;
-    if (val > center + deadzone) {
-        double norm = (val - center - deadzone) / pos_span;
-        out = clampd(norm, 0.0, 1.0) * OUTPUT_MAX;
-    } else if (val < center - deadzone) {
-        double norm = (center - deadzone - val) / neg_span;
-        out = -clampd(norm, 0.0, 1.0) * OUTPUT_MAX;
-    }
+    double denom = span - dz;
+    if (denom < 1.0) denom = 1.0;
+
+    double a_norm = (ad - dz) / denom;     // nominally 0..1+
+    a_norm = clampd(a_norm, 0.0, 1.0);     // clamp to max output (no rescale from extra force)
+
+    // soften near edge
+    a_norm = soft_knee_0to1(a_norm);
+
+    double out = a_norm * OUTPUT_MAX;
+    if (d < 0.0) out = -out;
 
     if (out > OUTPUT_MAX) out = OUTPUT_MAX;
     if (out < -OUTPUT_MAX) out = -OUTPUT_MAX;
 
-    return (int)out;
+    return (int)lrint(out);
 }
