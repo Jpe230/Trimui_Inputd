@@ -6,6 +6,7 @@
 
 #include "../device_helpers.h"
 #include "../device_rumble.h"
+#include "../turbo.h"
 #include "../../drivers/serial/serial.h"
 
 struct gamepad;
@@ -47,6 +48,19 @@ struct sp_button_map_entry {
     uint8_t mask;
     unsigned short code;
 };
+
+static const struct turbo_binding_cfg SP_TURBO_CFG[] = {
+    {TURBO_FLAG_PREFIX "a", BTN_EAST},
+    {TURBO_FLAG_PREFIX "b", BTN_SOUTH},
+    {TURBO_FLAG_PREFIX "x", BTN_NORTH},
+    {TURBO_FLAG_PREFIX "y", BTN_WEST},
+    {TURBO_FLAG_PREFIX "l", BTN_TL},
+    {TURBO_FLAG_PREFIX "l2", BTN_TL2},
+    {TURBO_FLAG_PREFIX "r", BTN_TR},
+    {TURBO_FLAG_PREFIX "r2", BTN_TR2},
+};
+
+enum { SP_TURBO_CFG_COUNT = sizeof(SP_TURBO_CFG) / sizeof(SP_TURBO_CFG[0]) };
 
 #pragma pack(push, 1)
 /* Bit-packed button payload for Smart Pro frames. */
@@ -93,4 +107,6 @@ struct smart_pro_device {
     struct smart_pro_right_ctx right;
     struct device_dirty_state dirty;
     struct device_rumble_state rumble;
+    struct turbo_binding turbo[8];
+    size_t turbo_count;
 };

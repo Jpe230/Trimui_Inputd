@@ -52,19 +52,22 @@ static bool poll_switch(struct gamepad *gp, int pin, int *last_val)
     return true;
 }
 
-static void emit_buttons_from_map(struct gamepad *gp, uint8_t btn_raw, uint8_t diff, const struct sp_button_map_entry *map, size_t map_len, struct device_dirty_state *dirty)
+static void emit_buttons_from_map(struct gamepad *gp, uint8_t btn_raw, uint8_t diff, const struct sp_button_map_entry *map, size_t map_len, struct device_dirty_state *dirty, struct turbo_binding *turbo, size_t turbo_count)
 {
     for (size_t i = 0; i < map_len; ++i) {
         uint8_t mask = map[i].mask;
         if (diff & mask) {
             int pressed = (btn_raw & mask) ? 1 : 0;
-            gamepad_emit_key(gp, map[i].code, pressed);
-            device_dirty_mark(dirty);
+            bool handled = turbo_note_physical(turbo, turbo_count, map[i].code, pressed != 0);
+            if (!handled) {
+                gamepad_emit_key(gp, map[i].code, pressed);
+                device_dirty_mark(dirty);
+            }
         }
     }
 }
 
-static void process_left_frame_bytes(struct smart_pro_left_ctx *ctx, const uint8_t frame_bytes[8], struct device_dirty_state *dirty)
+static void process_left_frame_bytes(struct smart_pro_left_ctx *ctx, const uint8_t frame_bytes[8], struct device_dirty_state *dirty, struct turbo_binding *turbo, size_t turbo_count)
 {
     uint8_t btn_raw = frame_bytes[2];
     uint16_t raw_x = ((uint16_t)frame_bytes[3] << 8) | frame_bytes[4];
@@ -83,7 +86,7 @@ static void process_left_frame_bytes(struct smart_pro_left_ctx *ctx, const uint8
 
     if (diff) {
         device_hat_apply_masks(&ctx->hat, btn_raw, diff, SP_BTN_DPAD_UP_MASK, SP_BTN_DPAD_DOWN_MASK, SP_BTN_DPAD_LEFT_MASK, SP_BTN_DPAD_RIGHT_MASK);
-        emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_LEFT_BUTTON_MAP, SP_LEFT_BUTTON_MAP_COUNT, dirty);
+        emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_LEFT_BUTTON_MAP, SP_LEFT_BUTTON_MAP_COUNT, dirty, turbo, turbo_count);
 
         if (diff & SP_DPAD_MASK) {
             device_dirty_merge(dirty, device_hat_emit(ctx->c.gp, &ctx->hat));
@@ -96,7 +99,7 @@ static void process_left_frame_bytes(struct smart_pro_left_ctx *ctx, const uint8
     ctx->c.have_prev_raw = true;
 }
 
-static void process_right_frame_bytes(struct smart_pro_right_ctx *ctx, const uint8_t frame_bytes[8], struct device_dirty_state *dirty)
+static void process_right_frame_bytes(struct smart_pro_right_ctx *ctx, const uint8_t frame_bytes[8], struct device_dirty_state *dirty, struct turbo_binding *turbo, size_t turbo_count)
 {
     uint8_t btn_raw = frame_bytes[2];
     uint16_t raw_x = ((uint16_t)frame_bytes[3] << 8) | frame_bytes[4];
@@ -114,7 +117,7 @@ static void process_right_frame_bytes(struct smart_pro_right_ctx *ctx, const uin
     }
 
     if (diff) {
-        emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_RIGHT_BUTTON_MAP, SP_RIGHT_BUTTON_MAP_COUNT, dirty);
+        emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_RIGHT_BUTTON_MAP, SP_RIGHT_BUTTON_MAP_COUNT, dirty, turbo, turbo_count);
     }
 
     ctx->c.prev_buttons = btn_raw;
@@ -182,6 +185,8 @@ int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct
 
     rb_init(&dev->left.c.rb);
     rb_init(&dev->right.c.rb);
+    dev->turbo_count = SP_TURBO_CFG_COUNT;
+    turbo_init_bindings(dev->turbo, dev->turbo_count, SP_TURBO_CFG);
 
     if (device_rumble_init(&dev->rumble, rumble_a133_driver()) < 0) {
         close(fd_left);
@@ -227,7 +232,7 @@ bool smart_pro_poll(void *ctx)
         if (r > 0) {
             rb_push(&dev->left.c.rb, buf, (size_t)r);
             while (rb_try_extract_frame_variantA(&dev->left.c.rb, frame_bytes)) {
-                process_left_frame_bytes(&dev->left, frame_bytes, &dev->dirty);
+                process_left_frame_bytes(&dev->left, frame_bytes, &dev->dirty, dev->turbo, dev->turbo_count);
             }
         }
     }
@@ -241,11 +246,12 @@ bool smart_pro_poll(void *ctx)
         if (r > 0) {
             rb_push(&dev->right.c.rb, buf, (size_t)r);
             while (rb_try_extract_frame_variantA(&dev->right.c.rb, frame_bytes)) {
-                process_right_frame_bytes(&dev->right, frame_bytes, &dev->dirty);
+                process_right_frame_bytes(&dev->right, frame_bytes, &dev->dirty, dev->turbo, dev->turbo_count);
             }
         }
     }
 
+    turbo_process_frame(dev->turbo, dev->turbo_count, dev->left.c.gp, &dev->dirty);
     device_dirty_flush(&dev->dirty, dev->left.c.gp);
     return true;
 }

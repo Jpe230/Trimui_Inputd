@@ -37,3 +37,6 @@ bool brick_poll(void *ctx);
  * @return void.
  */
 void brick_close(void *ctx);
+
+struct brick_state;
+void brick_refresh_dpad_flags(struct brick_state *st);

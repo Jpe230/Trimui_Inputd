@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "../../gamepad/uinput.h"
 #include "brick_structs.h"
@@ -46,6 +47,8 @@ static const unsigned short BRICK_KEYS[] = {
 
 /* Absolute axis descriptors for the Brick hat. */
 static const struct gamepad_abs_desc BRICK_AXES[] = {
+    BRICK_AXIS_DESC(ABS_X, -32767, 32767),
+    BRICK_AXIS_DESC(ABS_Y, -32767, 32767),
     BRICK_AXIS_DESC(ABS_HAT0X, -1, 1),
     BRICK_AXIS_DESC(ABS_HAT0Y, -1, 1),
 };
@@ -55,6 +58,35 @@ enum {
     BRICK_BUTTON_COUNT = sizeof(BRICK_BUTTON_DEFS) / sizeof(BRICK_BUTTON_DEFS[0]),
     BRICK_HAT_PIN_COUNT = sizeof(BRICK_HAT_PINS) / sizeof(BRICK_HAT_PINS[0]),
 };
+
+#define BRICK_DPAD_FLAG(path) "/tmp/trimui_inputd/" path
+
+#define BRICK_BUTTON_BIT(idx) (1u << (idx))
+
+enum {
+    BRICK_BTN_IDX_F1     = 15,
+    BRICK_BTN_IDX_F2     = 16,
+    BRICK_BTN_IDX_L2     = 10,
+    BRICK_BTN_IDX_R2     = 11,
+    BRICK_BTN_IDX_SELECT = 12,
+    BRICK_BTN_IDX_START  = 13,
+};
+
+struct brick_hold_map {
+    const char *path;
+    uint32_t bit;
+};
+
+static const struct brick_hold_map BRICK_HOLD_MAP[] = {
+    {BRICK_DPAD_FLAG("dpad2axis_hold_f1"),     BRICK_BUTTON_BIT(BRICK_BTN_IDX_F1)},
+    {BRICK_DPAD_FLAG("dpad2axis_hold_f2"),     BRICK_BUTTON_BIT(BRICK_BTN_IDX_F2)},
+    {BRICK_DPAD_FLAG("dpad2axis_hold_l2"),     BRICK_BUTTON_BIT(BRICK_BTN_IDX_L2)},
+    {BRICK_DPAD_FLAG("dpad2axis_hold_r2"),     BRICK_BUTTON_BIT(BRICK_BTN_IDX_R2)},
+    {BRICK_DPAD_FLAG("dpad2axis_hold_select"), BRICK_BUTTON_BIT(BRICK_BTN_IDX_SELECT)},
+    {BRICK_DPAD_FLAG("dpad2axis_hold_start"),  BRICK_BUTTON_BIT(BRICK_BTN_IDX_START)},
+};
+
+enum { BRICK_HOLD_MAP_COUNT = sizeof(BRICK_HOLD_MAP) / sizeof(BRICK_HOLD_MAP[0]) };
 
 enum { BRICK_GPIO_SWITCH = 243 }; /* Same GPIO used by Smart Pro tablet switch. */
 

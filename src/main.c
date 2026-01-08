@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include <linux/input.h>
 
@@ -14,6 +15,7 @@
 #include "devices/brick/brick.h"
 #include "devices/smart_pro/smart_pro.h"
 #include "devices/smart_pro_s/smart_pro_s.h"
+#include "devices/turbo.h"
 #include "gamepad/uinput.h"
 
 static volatile sig_atomic_t g_running = 1;
@@ -39,40 +41,144 @@ static void handle_signal(int sig)
     g_running = 0;
 }
 
+struct flag_poll_args {
+    enum variant variant;
+    void *dev_ctx;
+};
+
+static const struct device_ops OPS_TABLE[] = {
+    [VAR_SMART_PRO_S] = {.name = "Smart Pro S", .init = smart_pro_s_init, .poll = smart_pro_s_poll, .close = smart_pro_s_close},
+    [VAR_SMART_PRO]   = {.name = "Smart Pro",   .init = smart_pro_init,   .poll = smart_pro_poll,   .close = smart_pro_close  },
+    [VAR_BRICK]       = {.name = "Brick",       .init = brick_init,       .poll = brick_poll,       .close = brick_close      }
+};
+
+static void poll_variant_flags(const struct flag_poll_args *args)
+{
+    switch (args->variant) {
+    case VAR_SMART_PRO: {
+        struct smart_pro_device *dev = args->dev_ctx;
+        if (dev) {
+            turbo_refresh_flags(dev->turbo, dev->turbo_count);
+        }
+        break;
+    }
+    case VAR_SMART_PRO_S: {
+        struct smart_pro_s_device *dev = args->dev_ctx;
+        if (dev) {
+            turbo_refresh_flags(dev->turbo, dev->turbo_count);
+        }
+        break;
+    }
+    case VAR_BRICK: {
+        struct brick_state *st = args->dev_ctx;
+        if (st) {
+            brick_refresh_dpad_flags(st);
+            turbo_refresh_flags(st->turbo, st->turbo_count);
+        }
+        break;
+    }
+    }
+}
+
+static void *flag_thread_fn(void *arg)
+{
+    struct flag_poll_args *args = arg;
+    while (g_running) {
+        poll_variant_flags(args);
+        sleep(1);
+    }
+    return NULL;
+}
+
+static int daemonize_process(void)
+{
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return -1;
+    }
+    if (pid > 0) {
+        exit(EXIT_SUCCESS);
+    }
+
+    if (setsid() == -1) {
+        perror("setsid");
+        return -1;
+    }
+
+    struct sigaction sa = {0};
+    sa.sa_handler = SIG_IGN;
+    sigaction(SIGHUP, &sa, NULL);
+    return 0;
+}
+
+static void install_signal_handlers(void)
+{
+    signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
+}
+
+static const struct gamepad_desc *select_gamepad_desc(enum variant variant)
+{
+    switch (variant) {
+    case VAR_SMART_PRO_S: return &SMART_PRO_S_GAMEPAD_DESC;
+    case VAR_BRICK:       return &BRICK_GAMEPAD_DESC;
+    case VAR_SMART_PRO:
+    default:              return &SMART_PRO_GAMEPAD_DESC;
+    }
+}
+
+static void init_axes(struct axis_state *lx, struct axis_state *ly, struct axis_state *rx, struct axis_state *ry)
+{
+    lx->debug_id = 0;
+    ly->debug_id = 1;
+    rx->debug_id = 3;
+    ry->debug_id = 4;
+
+    cal_init(lx);
+    cal_init(ly);
+    cal_init(rx);
+    cal_init(ry);
+}
+
+static int start_flag_thread(pthread_t *thread, struct flag_poll_args *args)
+{
+    if (pthread_create(thread, NULL, flag_thread_fn, args) != 0) {
+        perror("pthread_create");
+        return -1;
+    }
+    return 0;
+}
+
+static int init_device_for_variant(enum variant variant,
+                                   void **dev_ctx,
+                                   struct gamepad *gp,
+                                   struct axis_state *lx,
+                                   struct axis_state *ly,
+                                   struct axis_state *rx,
+                                   struct axis_state *ry)
+{
+    if (OPS_TABLE[variant].init(dev_ctx, gp, lx, ly, rx, ry, g_verbose) < 0) {
+        return -1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
 
     (void)argc;
     (void)argv;
 
-    pid_t pid = fork();
-    if (pid < 0) {
-        perror("fork");
-        return EXIT_FAILURE;
-    }
-    if (pid > 0) {
-        // Parent exits
-        return EXIT_SUCCESS;
-    }
-
-    // Child continues
-    if (setsid() == -1) {
-        perror("setsid");
+    if (daemonize_process() < 0) {
         return EXIT_FAILURE;
     }
 
-    struct sigaction sa = {0};
-    sa.sa_handler = SIG_IGN;
-    sigaction(SIGHUP, &sa, NULL);
-
-    signal(SIGINT, handle_signal);
-    signal(SIGTERM, handle_signal);
+    install_signal_handlers();
 
     enum variant variant = detect_variant();
 
-    const struct gamepad_desc      *gp_desc = &SMART_PRO_GAMEPAD_DESC;
-    if (variant == VAR_SMART_PRO_S) gp_desc = &SMART_PRO_S_GAMEPAD_DESC;
-    else if (variant == VAR_BRICK)  gp_desc = &BRICK_GAMEPAD_DESC;
+    const struct gamepad_desc *gp_desc = select_gamepad_desc(variant);
 
     struct gamepad *gp = gamepad_init(gp_desc);
     if (!gp) {
@@ -82,37 +188,34 @@ int main(int argc, char **argv)
 
     struct axis_state lx, ly, rx, ry;
 
-    lx.debug_id = 0;
-    ly.debug_id = 1;
+    init_axes(&lx, &ly, &rx, &ry);
 
-    rx.debug_id = 3;
-    ry.debug_id = 4;
-
-    cal_init(&lx);
-    cal_init(&ly);
-    cal_init(&rx);
-    cal_init(&ry);
-
-    const struct device_ops ops_table[] = {
-        [VAR_SMART_PRO_S] = {.name = "Smart Pro S", .init = smart_pro_s_init, .poll = smart_pro_s_poll, .close = smart_pro_s_close},
-        [VAR_SMART_PRO]   = {.name = "Smart Pro",   .init = smart_pro_init,   .poll = smart_pro_poll,   .close = smart_pro_close  },
-        [VAR_BRICK]       = {.name = "Brick",       .init = brick_init,       .poll = brick_poll,       .close = brick_close      }
-    };
+    const struct device_ops *ops = &OPS_TABLE[variant];
 
     void *dev_ctx = NULL;
-    if (ops_table[variant].init(&dev_ctx, gp, &lx, &ly, &rx, &ry, g_verbose) < 0) {
+    if (init_device_for_variant(variant, &dev_ctx, gp, &lx, &ly, &rx, &ry) < 0) {
+        gamepad_destroy(gp);
+        return 1;
+    }
+
+    struct flag_poll_args flag_args = {.variant = variant, .dev_ctx = dev_ctx};
+    poll_variant_flags(&flag_args);
+    pthread_t flag_thread;
+    if (start_flag_thread(&flag_thread, &flag_args) < 0) {
+        ops->close(dev_ctx);
         gamepad_destroy(gp);
         return 1;
     }
 
     while (g_running) {
-        if (!ops_table[variant].poll(dev_ctx)) {
+        if (!ops->poll(dev_ctx)) {
             break;
         }
         usleep(LOOP_US);
     }
 
-    ops_table[variant].close(dev_ctx);
+    pthread_join(flag_thread, NULL);
+    ops->close(dev_ctx);
     gamepad_destroy(gp);
     return 0;
 }
