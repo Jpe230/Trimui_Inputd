@@ -3,6 +3,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <poll.h>
 
 #include "../device_helpers.h"
 #include "../device_rumble.h"
@@ -109,4 +110,5 @@ struct smart_pro_device {
     struct device_rumble_state rumble;
     struct turbo_binding turbo[8];
     size_t turbo_count;
+    struct pollfd pfds[2];
 };

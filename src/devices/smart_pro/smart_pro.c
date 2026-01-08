@@ -187,6 +187,8 @@ int smart_pro_init(void **ctx, struct gamepad *gp, struct axis_state *lx, struct
     rb_init(&dev->right.c.rb);
     dev->turbo_count = SP_TURBO_CFG_COUNT;
     turbo_init_bindings(dev->turbo, dev->turbo_count, SP_TURBO_CFG);
+    dev->pfds[0] = (struct pollfd){.fd = fd_left, .events = POLLIN};
+    dev->pfds[1] = (struct pollfd){.fd = fd_right, .events = POLLIN};
 
     if (device_rumble_init(&dev->rumble, rumble_a133_driver()) < 0) {
         close(fd_left);
@@ -210,11 +212,9 @@ bool smart_pro_poll(void *ctx)
         return false;
     }
 
-    struct pollfd pfds[2] = {
-        {.fd = dev->left.c.fd, .events = POLLIN},
-        {.fd = dev->right.c.fd, .events = POLLIN},
-    };
-    int pr = poll(pfds, 2, 0);
+    dev->pfds[0].revents = 0;
+    dev->pfds[1].revents = 0;
+    int pr = poll(dev->pfds, 2, 0);
     if (pr < 0) {
         if (errno == EINTR) {
             return true;
@@ -223,7 +223,7 @@ bool smart_pro_poll(void *ctx)
         return false;
     }
 
-    if (pfds[0].revents & POLLIN) {
+    if (dev->pfds[0].revents & POLLIN) {
         ssize_t r = serial_poll_read(dev->left.c.fd, buf, sizeof(buf));
         if (r < 0) {
             perror("read left");
@@ -237,7 +237,7 @@ bool smart_pro_poll(void *ctx)
         }
     }
 
-    if (pfds[1].revents & POLLIN) {
+    if (dev->pfds[1].revents & POLLIN) {
         ssize_t r = serial_poll_read(dev->right.c.fd, buf, sizeof(buf));
         if (r < 0) {
             perror("read right");

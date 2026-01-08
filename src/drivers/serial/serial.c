@@ -9,10 +9,13 @@
 #include <unistd.h>
 
 #define RB_CAPACITY (sizeof(((struct ring_buffer *)0)->data))
+#define RB_MASK (RB_CAPACITY - 1)
+
+_Static_assert((RB_CAPACITY & RB_MASK) == 0, "RB_CAPACITY must be power of two");
 
 static size_t rb_index(const struct ring_buffer *rb, size_t offset)
 {
-    return (rb->head + offset) % RB_CAPACITY;
+    return (rb->head + offset) & RB_MASK;
 }
 
 void rb_init(struct ring_buffer *rb)
@@ -26,7 +29,7 @@ static void rb_drop(struct ring_buffer *rb, size_t count)
     if (count > rb->len) {
         count = rb->len;
     }
-    rb->head = (rb->head + count) % RB_CAPACITY;
+    rb->head = (rb->head + count) & RB_MASK;
     rb->len -= count;
 }
 
@@ -56,19 +59,46 @@ void rb_push(struct ring_buffer *rb, const uint8_t *data, size_t len)
 
 ssize_t rb_find(struct ring_buffer *rb, uint8_t start_byte)
 {
-    for (size_t i = 0; i < rb->len; ++i) {
-        if (rb->data[rb_index(rb, i)] == start_byte) {
-            return (ssize_t)i;
-        }
+    if (rb->len == 0) {
+        return -1;
     }
-    return -1;
+
+    size_t head = rb->head;
+    size_t first_chunk = RB_CAPACITY - head;
+    if (first_chunk > rb->len) {
+        first_chunk = rb->len;
+    }
+
+    const uint8_t *p = memchr(&rb->data[head], start_byte, first_chunk);
+    if (p) {
+        return (ssize_t)(p - &rb->data[head]);
+    }
+
+    size_t remaining = rb->len - first_chunk;
+    if (remaining == 0) {
+        return -1;
+    }
+
+    const uint8_t *q = memchr(&rb->data[0], start_byte, remaining);
+    return q ? (ssize_t)(first_chunk + (size_t)(q - &rb->data[0])) : -1;
 }
 
 static void rb_copy_out(const struct ring_buffer *rb, size_t offset, uint8_t *out, size_t len)
 {
-    for (size_t i = 0; i < len; ++i) {
-        out[i] = rb->data[rb_index(rb, offset + i)];
+    size_t start = rb_index(rb, offset);
+    size_t first = RB_CAPACITY - start;
+    if (first > len) {
+        first = len;
     }
+    memcpy(out, &rb->data[start], first);
+    if (len > first) {
+        memcpy(out + first, &rb->data[0], len - first);
+    }
+}
+
+static inline uint8_t rb_peek(const struct ring_buffer *rb, size_t offset)
+{
+    return rb->data[rb_index(rb, offset)];
 }
 
 int rb_try_extract_frame_variantA(struct ring_buffer *rb, uint8_t *out8)
@@ -78,15 +108,16 @@ int rb_try_extract_frame_variantA(struct ring_buffer *rb, uint8_t *out8)
         if (idx < 0) {
             return 0;
         }
-        if (rb->len - (size_t)idx < 8) {
+        size_t start = (size_t)idx;
+        if (rb->len - start < 8) {
             return 0;
         }
-        rb_copy_out(rb, (size_t)idx, out8, 8);
-        if (out8[7] == 0xFE) {
-            rb_drop(rb, (size_t)idx + 8);
+        if (rb_peek(rb, start + 7) == 0xFE) {
+            rb_copy_out(rb, start, out8, 8);
+            rb_drop(rb, start + 8);
             return 1;
         }
-        rb_drop(rb, (size_t)idx + 1);
+        rb_drop(rb, start + 1);
     }
 }
 
@@ -97,15 +128,16 @@ int rb_try_extract_frame_variantB(struct ring_buffer *rb, uint8_t *out20)
         if (idx < 0) {
             return 0;
         }
-        if (rb->len - (size_t)idx < 20) {
+        size_t start = (size_t)idx;
+        if (rb->len - start < 20) {
             return 0;
         }
-        rb_copy_out(rb, (size_t)idx, out20, 20);
-        if (out20[0x12] == 0xFE) {
-            rb_drop(rb, (size_t)idx + 20);
+        if (rb_peek(rb, start + 0x12) == 0xFE) {
+            rb_copy_out(rb, start, out20, 20);
+            rb_drop(rb, start + 20);
             return 1;
         }
-        rb_drop(rb, (size_t)idx + 1);
+        rb_drop(rb, start + 1);
     }
 }
 

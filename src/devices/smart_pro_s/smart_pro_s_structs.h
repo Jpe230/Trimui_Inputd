@@ -3,6 +3,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <poll.h>
 
 #include "../device_helpers.h"
 #include "../turbo.h"
@@ -109,4 +110,5 @@ struct smart_pro_s_device {
     struct device_dirty_state dirty;
     struct turbo_binding turbo[8];
     size_t turbo_count;
+    struct pollfd pfds[2];
 };

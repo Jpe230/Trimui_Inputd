@@ -1,6 +1,8 @@
 CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -pthread
-LDFLAGS = -pthread -lm -lrt
+OPTFLAGS ?= -O2 -fomit-frame-pointer -fdata-sections -ffunction-sections -pipe -DNDEBUG -flto
+CFLAGS += $(OPTFLAGS)
+LDFLAGS = -pthread -lm -lrt -Wl,--gc-sections -flto
 
 TARGET = trimui_inputd
 

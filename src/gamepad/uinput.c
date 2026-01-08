@@ -109,12 +109,12 @@ static void emit_event(struct gamepad *gp, unsigned short type, unsigned short c
     if (!gp) {
         return;
     }
-    struct input_event ev;
-    memset(&ev, 0, sizeof(ev));
+    struct input_event ev = {
+        .type = type,
+        .code = code,
+        .value = value,
+    };
     gettimeofday(&ev.time, NULL);
-    ev.type = type;
-    ev.code = code;
-    ev.value = value;
     if (write(gp->fd, &ev, sizeof(ev)) < 0) {
         perror("write uinput");
     }
