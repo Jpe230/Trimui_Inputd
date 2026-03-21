@@ -30,6 +30,7 @@
 #define GPIO_CFG_OFFSET(pin) ((((pin) & 0x1Fu) & 0x7u) << 2) // 0,4,8,...,28
 
 static size_t g_map_len = 0;
+static uint32_t g_init_count = 0;
 
 // We keep both the raw mmap base and the "usable" base (base+offset).
 static void* g_map0 = NULL;
@@ -60,7 +61,10 @@ static int map_region(uint32_t phys, void** out_map, volatile uint8_t** out_base
 }
 
 int sunxi_gpio_init(void) {
-    if (g_pio || g_pio_lm) return -1;
+    if (g_pio && g_pio_lm) {
+        ++g_init_count;
+        return 0;
+    }
 
     if (map_region(SUNXI_PIO_PHYS_BASE, &g_map0, &g_pio) < 0) {
         return -1;
@@ -71,10 +75,14 @@ int sunxi_gpio_init(void) {
         return -1;
     }
 
+    g_init_count = 1;
     return 0;
 }
 
 void sunxi_gpio_close(void) {
+    if (g_init_count == 0) return;
+    if (--g_init_count > 0) return;
+
     if (g_map0 && g_map_len) munmap(g_map0, g_map_len);
     if (g_map1 && g_map_len) munmap(g_map1, g_map_len);
 
@@ -118,4 +126,22 @@ int sunxi_gpio_input(uint32_t pin) {
     uint32_t dat = *dat_reg;
 
     return (int)((dat >> num) & 0x1u);
+}
+
+int sunxi_gpio_output(uint32_t pin, uint32_t val) {
+    volatile uint8_t* b = bank_base(pin);
+    if (!b) return -1;
+
+    uint32_t num = GPIO_NUM(pin);
+    volatile uint32_t* dat_reg = (volatile uint32_t*)(b + OFF_DAT);
+    uint32_t dat = *dat_reg;
+
+    if (val) {
+        dat |= (0x1u << num);
+    } else {
+        dat &= ~(0x1u << num);
+    }
+
+    *dat_reg = dat;
+    return 0;
 }

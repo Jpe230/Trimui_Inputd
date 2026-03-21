@@ -27,6 +27,15 @@ void sunxi_gpio_close(void);
 int sunxi_gpio_input(uint32_t pin);
 
 /**
+ * Drive a GPIO pin high or low.
+ *
+ * @param pin GPIO number to drive.
+ * @param val Output value, 0 for low and non-zero for high.
+ * @return 0 on success, -1 on failure.
+ */
+int sunxi_gpio_output(uint32_t pin, uint32_t val);
+
+/**
  * Configure a GPIO pin as input or output.
  *
  * @param pin GPIO number to configure.
