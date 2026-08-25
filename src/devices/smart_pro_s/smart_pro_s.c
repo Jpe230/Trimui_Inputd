@@ -14,6 +14,7 @@
 #include "../../calibration/calibration.h"
 #include "../../drivers/sunxi-gpio/sunxi-gpio.h"
 #include "../../drivers/gpio/gpio.h"
+#include "../../drivers/rumble/pwm-vibrator/rumble_pwm_vibrator.h"
 
 static struct smart_pro_s_device smart_pro_s_ctx;
 static const struct device_axis_cfg SP_S_AXIS_LEFT_CFG = {.abs_code_x = ABS_X, .abs_code_y = ABS_Y, .invert_x = false, .invert_y = true};
@@ -202,6 +203,12 @@ int smart_pro_s_init(void **ctx, struct gamepad *gp, struct axis_state *lx, stru
     turbo_init_bindings(dev->turbo, dev->turbo_count, SP_S_TURBO_CFG);
     dev->pfds[0] = (struct pollfd){.fd = fd_left, .events = POLLIN};
     dev->pfds[1] = (struct pollfd){.fd = fd_right, .events = POLLIN};
+    if (device_rumble_init(&dev->rumble, rumble_pwm_vibrator_driver()) < 0) {
+        close(fd_left);
+        close(fd_right);
+        sunxi_gpio_close();
+        return -1;
+    }
 
     *ctx = dev;
     return 0;
@@ -216,6 +223,9 @@ bool smart_pro_s_poll(void *ctx)
 
     dev->pfds[0].revents = 0;
     dev->pfds[1].revents = 0;
+    if (!device_rumble_poll(&dev->rumble, dev->left.c.gp)) {
+        return false;
+    }
     int pr = poll(dev->pfds, 2, 0);
     if (pr < 0) {
         if (errno == EINTR) {
@@ -264,6 +274,7 @@ void smart_pro_s_close(void *ctx)
     if (!dev) return;
     close(dev->left.c.fd);
     close(dev->right.c.fd);
+    device_rumble_close(&dev->rumble);
     sunxi_gpio_close();
     memset(dev, 0, sizeof(*dev));
 }
