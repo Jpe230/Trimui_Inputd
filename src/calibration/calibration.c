@@ -26,7 +26,7 @@
 #define DEADZONE_NOISE_BASE  6.0
 #define NOISE_ALPHA          0.08
 #define NOISE_MULT           6.0
-#define DEADZONE_USER_MIN    25.0   // raise if you want more "slack masking"
+#define DEADZONE_USER_MIN 100.0 // suppress small TMR-stick idle drift
 #define DEADZONE_USER_MAX    250.0
 
 // Effective range (soft-limit) learning
