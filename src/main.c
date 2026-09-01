@@ -22,6 +22,8 @@ static volatile sig_atomic_t g_running = 1;
 static bool g_verbose = false;
 static const useconds_t LOOP_US = 16000;
 
+#define CALIBRATION_PATH_COUNT 3
+
 enum variant {
     VAR_SMART_PRO_S,
     VAR_SMART_PRO,
@@ -141,6 +143,48 @@ static void init_axes(struct axis_state *lx, struct axis_state *ly, struct axis_
     cal_init(ry);
 }
 
+static void load_one_upstream_calibration(const char *override_path,
+                                          const char *const *paths,
+                                          struct axis_state *x,
+                                          struct axis_state *y)
+{
+    if (override_path) {
+        if (cal_load_config(override_path, x, y) < 0) {
+            fprintf(stderr, "Ignoring invalid joystick calibration: %s\n", override_path);
+        }
+        return;
+    }
+
+    for (size_t i = 0; i < CALIBRATION_PATH_COUNT; ++i) {
+        int result = cal_load_config(paths[i], x, y);
+        if (result == 1) continue;
+        if (result < 0) {
+            fprintf(stderr, "Ignoring invalid joystick calibration: %s\n", paths[i]);
+        }
+        return;
+    }
+}
+
+static void load_upstream_calibration(struct axis_state *lx,
+                                      struct axis_state *ly,
+                                      struct axis_state *rx,
+                                      struct axis_state *ry)
+{
+    static const char *const left_paths[CALIBRATION_PATH_COUNT] = {
+        "/etc/trimui/joypad.config",
+        "/userdata/system/joypad.config",
+        "/mnt/UDISK/joypad.config",
+    };
+    static const char *const right_paths[CALIBRATION_PATH_COUNT] = {
+        "/etc/trimui/joypad_right.config",
+        "/userdata/system/joypad_right.config",
+        "/mnt/UDISK/joypad_right.config",
+    };
+
+    load_one_upstream_calibration(getenv("TRIMUI_JOYPAD_CONFIG"), left_paths, lx, ly);
+    load_one_upstream_calibration(getenv("TRIMUI_JOYPAD_RIGHT_CONFIG"), right_paths, rx, ry);
+}
+
 static int start_flag_thread(pthread_t *thread, struct flag_poll_args *args)
 {
     if (pthread_create(thread, NULL, flag_thread_fn, args) != 0) {
@@ -189,6 +233,7 @@ int main(int argc, char **argv)
     struct axis_state lx, ly, rx, ry;
 
     init_axes(&lx, &ly, &rx, &ry);
+    load_upstream_calibration(&lx, &ly, &rx, &ry);
 
     const struct device_ops *ops = &OPS_TABLE[variant];
 

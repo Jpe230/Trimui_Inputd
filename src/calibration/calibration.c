@@ -2,11 +2,12 @@
 #include "calibration.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h> // qsort
 #include <string.h> // memset
 
 #define RAW_MIN            0.0
-#define RAW_MAX            4095.0
+#define RAW_MAX            4096.0
 #define RAW_CENTER_DEFAULT ((RAW_MAX - RAW_MIN) / 2.0)
 #define OUTPUT_MAX         32767.0
 
@@ -99,6 +100,7 @@ void cal_init(struct axis_state *a)
     memset(a, 0, sizeof(*a));
 
     a->initialized = false;
+    a->has_upstream_config = false;
     a->samples = 0;
 
     a->boot_count = 0;
@@ -110,6 +112,10 @@ void cal_init(struct axis_state *a)
     a->pos_span = START_HALF_SPAN;
 
     a->deadzone = DEADZONE_USER_MIN;
+    a->raw_min = RAW_MIN;
+    a->raw_max = RAW_MAX;
+    a->upstream_zero = RAW_CENTER_DEFAULT;
+    a->upstream_deadzone = 0.0;
 
     a->filt = RAW_CENTER_DEFAULT;
     a->prev_filt = RAW_CENTER_DEFAULT;
@@ -123,8 +129,65 @@ void cal_init(struct axis_state *a)
     recompute_minmax(a);
 }
 
+struct upstream_config {
+    double x_min, x_max, y_min, y_max;
+    double x_zero, y_zero, deadzone;
+    bool seen_x_min, seen_x_max, seen_y_min, seen_y_max;
+    bool seen_x_zero, seen_y_zero, seen_deadzone;
+};
+
+static bool valid_upstream_axis(double min, double max, double zero)
+{
+    return isfinite(min) && isfinite(max) && isfinite(zero) &&
+           min >= RAW_MIN && max <= RAW_MAX && min < zero && zero < max;
+}
+
+int cal_load_config(const char *path, struct axis_state *x, struct axis_state *y)
+{
+    struct upstream_config cfg = {0};
+    FILE *fp = fopen(path, "r");
+    if (!fp) return 1;
+
+    char line[128];
+    while (fgets(line, sizeof(line), fp)) {
+        char key[32];
+        double value;
+        if (sscanf(line, " %31[^= ] = %lf", key, &value) != 2) continue;
+        if (strcmp(key, "x_min") == 0) { cfg.x_min = value; cfg.seen_x_min = true; }
+        else if (strcmp(key, "x_max") == 0) { cfg.x_max = value; cfg.seen_x_max = true; }
+        else if (strcmp(key, "y_min") == 0) { cfg.y_min = value; cfg.seen_y_min = true; }
+        else if (strcmp(key, "y_max") == 0) { cfg.y_max = value; cfg.seen_y_max = true; }
+        else if (strcmp(key, "x_zero") == 0) { cfg.x_zero = value; cfg.seen_x_zero = true; }
+        else if (strcmp(key, "y_zero") == 0) { cfg.y_zero = value; cfg.seen_y_zero = true; }
+        else if (strcmp(key, "deadzone") == 0) { cfg.deadzone = value; cfg.seen_deadzone = true; }
+    }
+    fclose(fp);
+
+    bool complete = cfg.seen_x_min && cfg.seen_x_max && cfg.seen_y_min && cfg.seen_y_max &&
+                    cfg.seen_x_zero && cfg.seen_y_zero && cfg.seen_deadzone;
+    bool valid = complete && cfg.deadzone >= 0.0 && cfg.deadzone < 1.0 &&
+                 valid_upstream_axis(cfg.x_min, cfg.x_max, cfg.x_zero) &&
+                 valid_upstream_axis(cfg.y_min, cfg.y_max, cfg.y_zero);
+    if (!valid) return -1;
+
+    x->has_upstream_config = true;
+    x->initialized = true;
+    x->raw_min = cfg.x_min;
+    x->raw_max = cfg.x_max;
+    x->upstream_zero = cfg.x_zero;
+    x->upstream_deadzone = cfg.deadzone;
+    y->has_upstream_config = true;
+    y->initialized = true;
+    y->raw_min = cfg.y_min;
+    y->raw_max = cfg.y_max;
+    y->upstream_zero = cfg.y_zero;
+    y->upstream_deadzone = cfg.deadzone;
+    return 0;
+}
+
 void cal_update(struct axis_state *a, int raw)
 {
+    if (a->has_upstream_config) return;
     double val = clampd((double)raw, RAW_MIN, RAW_MAX);
 
     // Boot phase: collect BOOT_SAMPLES, then init from median center.
@@ -232,6 +295,17 @@ void cal_update2(struct axis_state *ax, struct axis_state *ay, int raw_x, int ra
 int cal_apply(struct axis_state *a, int raw)
 {
     if (!a->initialized) return 0;
+
+    if (a->has_upstream_config) {
+        double val = clampd((double)raw, a->raw_min, a->raw_max);
+        double normalized = (val >= a->upstream_zero)
+            ? (val - a->upstream_zero) / (a->raw_max - a->upstream_zero)
+            : (val - a->upstream_zero) / (a->upstream_zero - a->raw_min);
+        double magnitude = fabs(normalized);
+        if (magnitude <= a->upstream_deadzone) return 0;
+        magnitude = (magnitude - a->upstream_deadzone) / (1.0 - a->upstream_deadzone);
+        return (int)lrint((normalized < 0.0 ? -magnitude : magnitude) * OUTPUT_MAX);
+    }
 
     double val = clampd((double)raw, RAW_MIN, RAW_MAX);
     double d = val - a->center;

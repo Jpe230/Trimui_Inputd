@@ -66,3 +66,4 @@ bool device_rumble_poll(struct device_rumble_state *st, struct gamepad *gp);
  * @return Pointer to the driver descriptor.
  */
 const struct device_rumble_driver *rumble_a133_driver(void);
+const struct device_rumble_driver *rumble_pwm_vibrator_driver(void);
