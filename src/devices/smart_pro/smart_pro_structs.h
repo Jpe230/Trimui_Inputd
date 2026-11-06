@@ -53,8 +53,8 @@ struct sp_button_map_entry {
 static const struct turbo_binding_cfg SP_TURBO_CFG[] = {
     {TURBO_FLAG_PREFIX "a", BTN_EAST},
     {TURBO_FLAG_PREFIX "b", BTN_SOUTH},
-    {TURBO_FLAG_PREFIX "x", BTN_NORTH},
-    {TURBO_FLAG_PREFIX "y", BTN_WEST},
+    {TURBO_FLAG_PREFIX "x", BTN_WEST},
+    {TURBO_FLAG_PREFIX "y", BTN_NORTH},
     {TURBO_FLAG_PREFIX "l", BTN_TL},
     {TURBO_FLAG_PREFIX "l2", BTN_TL2},
     {TURBO_FLAG_PREFIX "r", BTN_TR},

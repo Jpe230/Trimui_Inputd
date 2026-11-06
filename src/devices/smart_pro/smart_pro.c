@@ -17,7 +17,7 @@
 
 static struct smart_pro_device smart_pro_ctx;
 static const struct device_axis_cfg SP_AXIS_LEFT_CFG = {.abs_code_x = ABS_X, .abs_code_y = ABS_Y, .invert_x = true, .invert_y = true};
-static const struct device_axis_cfg SP_AXIS_RIGHT_CFG = {.abs_code_x = ABS_Z, .abs_code_y = ABS_RZ, .invert_x = true, .invert_y = true};
+static const struct device_axis_cfg SP_AXIS_RIGHT_CFG = {.abs_code_x = ABS_RX, .abs_code_y = ABS_RY, .invert_x = true, .invert_y = true};
 
 static int smart_pro_gpio_init(void)
 {
@@ -67,6 +67,15 @@ static void emit_buttons_from_map(struct gamepad *gp, uint8_t btn_raw, uint8_t d
     }
 }
 
+
+// The orginal version of trimui_inputd set the trigger buttons as axis Z and RZ, even though they are not analog inputs
+//This function handles the state of the axis (either 0 or 255)
+static void emit_trigger_axis(struct gamepad *gp, unsigned short abs_code, bool pressed, struct device_dirty_state *dirty)
+{
+    gamepad_emit_abs(gp, abs_code, pressed ? 255 : 0);
+    device_dirty_mark(dirty);
+}
+
 static void process_left_frame_bytes(struct smart_pro_left_ctx *ctx, const uint8_t frame_bytes[8], struct device_dirty_state *dirty, struct turbo_binding *turbo, size_t turbo_count)
 {
     uint8_t btn_raw = frame_bytes[2];
@@ -86,6 +95,9 @@ static void process_left_frame_bytes(struct smart_pro_left_ctx *ctx, const uint8
 
     if (diff) {
         device_hat_apply_masks(&ctx->hat, btn_raw, diff, SP_BTN_DPAD_UP_MASK, SP_BTN_DPAD_DOWN_MASK, SP_BTN_DPAD_LEFT_MASK, SP_BTN_DPAD_RIGHT_MASK);
+        if (diff & SP_BTN_L2_MASK) { //If one of the buttons pressed match the L2 mask_id, it calls the emit_trigger_axis setting Z axis high
+            emit_trigger_axis(ctx->c.gp, ABS_Z, (btn_raw & SP_BTN_L2_MASK) != 0, dirty);
+        }
         emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_LEFT_BUTTON_MAP, SP_LEFT_BUTTON_MAP_COUNT, dirty, turbo, turbo_count);
 
         if (diff & SP_DPAD_MASK) {
@@ -117,6 +129,9 @@ static void process_right_frame_bytes(struct smart_pro_right_ctx *ctx, const uin
     }
 
     if (diff) {
+        if (diff & SP_BTN_R2_MASK) { //If one of the buttons pressed match the R2 mask_id, it calls the emit_trigger_axis setting RZ axis high
+            emit_trigger_axis(ctx->c.gp, ABS_RZ, (btn_raw & SP_BTN_R2_MASK) != 0, dirty);
+        }
         emit_buttons_from_map(ctx->c.gp, btn_raw, diff, SP_RIGHT_BUTTON_MAP, SP_RIGHT_BUTTON_MAP_COUNT, dirty, turbo, turbo_count);
     }
 

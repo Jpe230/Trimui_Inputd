@@ -46,14 +46,12 @@ enum {
 /* Map left-hand packed button bits to uinput codes. */
 static const struct sp_button_map_entry SP_LEFT_BUTTON_MAP[] = {
     {SP_BTN_L1_MASK, BTN_TL},
-    {SP_BTN_L2_MASK, BTN_TL2},
     {SP_BTN_MODE_MASK, BTN_MODE},
 };
 
 /* Map right-hand packed button bits to uinput codes. */
 static const struct sp_button_map_entry SP_RIGHT_BUTTON_MAP[] = {
     {SP_BTN_R1_MASK, BTN_TR},
-    {SP_BTN_R2_MASK, BTN_TR2},
     {SP_BTN_Y_MASK, BTN_NORTH},
     {SP_BTN_X_MASK, BTN_WEST},
     {SP_BTN_B_MASK, BTN_SOUTH},
@@ -71,16 +69,18 @@ enum {
 /* Exposed key codes for the Smart Pro controller. */
 static const unsigned short SP_KEYS[] = {
     BTN_EAST, BTN_SOUTH, BTN_NORTH, BTN_WEST,
-    BTN_TL, BTN_TR, BTN_TL2, BTN_TR2,
-    BTN_SELECT, BTN_START, BTN_MODE,
-};
+    BTN_TL, BTN_TR, //Since L2/R2 are now axis Z and RZ, theres no longer need to expose L2 and R2 buttons 
+    BTN_SELECT, BTN_START, BTN_MODE, BTN_THUMBL, BTN_THUMBR,
+}; //DETAIL: Exposing buttons L2/R2 confuses thier mappings making them being interpreted as SELECT and START
 
 /* Absolute axis descriptions for both Smart Pro sticks and the hat. */
 static const struct gamepad_abs_desc SP_AXES[] = {
     SP_AXIS_DESC(ABS_X, -32767, 32767),
     SP_AXIS_DESC(ABS_Y, -32767, 32767),
-    SP_AXIS_DESC(ABS_Z, -32767, 32767),
-    SP_AXIS_DESC(ABS_RZ, -32767, 32767),
+    SP_AXIS_DESC(ABS_RY, -32767, 32767), //RY, RX, Z and RZ were ajusted to match new conditions
+    SP_AXIS_DESC(ABS_RX, -32767, 32767),
+    SP_AXIS_DESC(ABS_Z, 0, 255),  // Included L2 axis
+    SP_AXIS_DESC(ABS_RZ, 0, 255), // Included R2 axis
     SP_AXIS_DESC(ABS_HAT0X, -1, 1),
     SP_AXIS_DESC(ABS_HAT0Y, -1, 1),
 };
@@ -93,9 +93,9 @@ static const struct gamepad_desc SMART_PRO_GAMEPAD_DESC = {
     .name = "TRIMUI Smart Pro Controller",
     .id = {
         .bustype = 0x0003,
-        .vendor  = 0x0000,
-        .product = 0x0000,
-        .version = 2,
+        .vendor  = 0x045e, // Changed to match og trimui_inputd (not actually needed)
+        .product = 0x028e, // Changed to match og trimui_inputd (not actually needed)
+        .version = 0x0114, // Changed to match og trimui_inputd (not actually needed)
     },
     .keys = SP_KEYS,
     .key_count = sizeof(SP_KEYS) / sizeof(SP_KEYS[0]),
